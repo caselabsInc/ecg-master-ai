@@ -20,6 +20,9 @@ function authErrorMessage(error: any) {
   if (code.includes('invalid-email')) return 'Enter a valid email address.';
   if (code.includes('weak-password')) return 'Use a stronger password with at least 6 characters.';
   if (code.includes('network-request-failed')) return 'Network connection unavailable. Please try again when you are online.';
+  if (code.includes('invalid-api-key') || code.includes('app-deleted') || code.includes('project-not-found')) {
+    return 'The app could not connect to Firebase. Please install the latest build and try again.';
+  }
   return 'Account creation could not be completed. Please try again.';
 }
 
@@ -27,6 +30,7 @@ export default function SignUp() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
   const router = useRouter();
@@ -132,8 +136,9 @@ export default function SignUp() {
         await refreshUserData();
       }
     } catch (e: any) {
+      console.error('Google sign-up failed', e?.code, e?.message || e);
       if (e.code !== 'ASYNC_OP_IN_PROGRESS' && e.code !== 'SIGN_IN_CANCELLED') {
-        Alert.alert('Google sign-up unavailable', authErrorMessage(e));
+        Alert.alert('Google sign-up unavailable', `${authErrorMessage(e)}${e?.code ? `\n\nCode: ${e.code}` : ''}`);
       }
     } finally {
       setLoading(false);
@@ -190,8 +195,15 @@ export default function SignUp() {
               placeholderTextColor="#94a3b8"
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              secureTextEntry={!passwordVisible}
             />
+            <TouchableOpacity
+              accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+              onPress={() => setPasswordVisible((visible) => !visible)}
+              style={styles.passwordToggle}
+            >
+              <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748b" />
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity style={styles.button} onPress={handleSignUp} disabled={loading}>
@@ -288,6 +300,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#334155',
+  },
+  passwordToggle: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    marginLeft: 8,
+    width: 44,
   },
   button: {
     backgroundColor: '#0c172e',

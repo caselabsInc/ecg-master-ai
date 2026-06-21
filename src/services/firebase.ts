@@ -6,12 +6,12 @@ import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'mock_api_key',
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'mock_domain',
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'mock_project_id',
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'mock_bucket',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || 'mock_sender_id',
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || 'mock_app_id',
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyA-L6E0RrA0hJxFkJD_DhfZbSpdlDrFbIQ',
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'quantum-monitor-433003-j0.firebaseapp.com',
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'quantum-monitor-433003-j0',
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'quantum-monitor-433003-j0.firebasestorage.app',
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '984586118056',
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '1:984586118056:ios:74d1eb60807d452d7af39d',
 };
 
 const isAppInitialized = getApps().length > 0;

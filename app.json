@@ -10,7 +10,7 @@
     "ios": {
       "icon": "./assets/icon.png",
       "bundleIdentifier": "com.caselabs.ecgmaster",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "googleServicesFile": "./GoogleService-Info.plist",
       "config": {
         "usesNonExemptEncryption": false

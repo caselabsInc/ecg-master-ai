@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { signInWithEmailAndPassword, OAuthProvider, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { signInWithEmailAndPassword, OAuthProvider, GoogleAuthProvider, signInWithCredential, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -20,13 +20,18 @@ function authErrorMessage(error: any) {
     return 'We could not verify those credentials. Check the email and password, then try again.';
   }
   if (code.includes('invalid-email')) return 'Enter a valid email address.';
+  if (code.includes('missing-email')) return 'Enter your email address first.';
   if (code.includes('network-request-failed')) return 'Network connection unavailable. Please try again when you are online.';
+  if (code.includes('invalid-api-key') || code.includes('app-deleted') || code.includes('project-not-found')) {
+    return 'The app could not connect to Firebase. Please install the latest build and try again.';
+  }
   return 'Sign-in could not be completed. Please try again.';
 }
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
   const router = useRouter();
@@ -49,6 +54,24 @@ export default function SignIn() {
       await refreshUserData();
     } catch (error: any) {
       Alert.alert('Sign-in unsuccessful', authErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert('Enter your email', 'Add your email address, then tap Forgot password again.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      Alert.alert('Reset email sent', 'Check your email for a password reset link.');
+    } catch (error: any) {
+      Alert.alert('Password reset unavailable', authErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -127,8 +150,9 @@ export default function SignIn() {
         await refreshUserData();
       }
     } catch (e: any) {
+      console.error('Google sign-in failed', e?.code, e?.message || e);
       if (e.code !== 'ASYNC_OP_IN_PROGRESS' && e.code !== 'SIGN_IN_CANCELLED') {
-        Alert.alert('Google sign-in unavailable', authErrorMessage(e));
+        Alert.alert('Google sign-in unavailable', `${authErrorMessage(e)}${e?.code ? `\n\nCode: ${e.code}` : ''}`);
       }
     } finally {
       setLoading(false);
@@ -173,9 +197,20 @@ export default function SignIn() {
               placeholderTextColor="#94a3b8"
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              secureTextEntry={!passwordVisible}
             />
+            <TouchableOpacity
+              accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+              onPress={() => setPasswordVisible((visible) => !visible)}
+              style={styles.passwordToggle}
+            >
+              <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748b" />
+            </TouchableOpacity>
           </View>
+
+          <TouchableOpacity style={styles.forgotButton} onPress={handleForgotPassword} disabled={loading}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.button} onPress={handleSignIn} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign in</Text>}
@@ -271,6 +306,22 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#334155',
+  },
+  passwordToggle: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    marginLeft: 8,
+    width: 44,
+  },
+  forgotButton: {
+    alignSelf: 'flex-end',
+    marginBottom: 8,
+  },
+  forgotText: {
+    color: '#0c172e',
+    fontSize: 14,
+    fontWeight: '700',
   },
   button: {
     backgroundColor: '#0c172e',
