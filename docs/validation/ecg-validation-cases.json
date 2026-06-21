@@ -1,0 +1,74 @@
+[
+  {
+    "id": "normal-001",
+    "category": "normal",
+    "title": "Normal sinus rhythm",
+    "expectedRuleFindings": ["normal rate", "sinus rhythm", "normal PR", "narrow QRS", "normal QTc"],
+    "mustWarnIfMissing": ["clinical indication", "ST-segment lead-level assessment"],
+    "highRisk": false
+  },
+  {
+    "id": "rhythm-af-001",
+    "category": "rhythm",
+    "title": "Atrial fibrillation",
+    "expectedRuleFindings": ["irregularly irregular R-R intervals", "absent organized P waves", "atrial fibrillation possible"],
+    "mustWarnIfMissing": ["QRS width", "rate severity", "clinical stability"],
+    "highRisk": true
+  },
+  {
+    "id": "rhythm-avblock-001",
+    "category": "rhythm",
+    "title": "Second-degree AV block pattern",
+    "expectedRuleFindings": ["more P waves than QRS complexes", "dropped beats present", "AV block concern"],
+    "mustWarnIfMissing": ["dropped-beat pattern", "symptoms", "escape rhythm assessment"],
+    "highRisk": true
+  },
+  {
+    "id": "qrs-lbbb-001",
+    "category": "qrs",
+    "title": "Left bundle branch block",
+    "expectedRuleFindings": ["wide QRS", "LBBB pattern", "ST interpretation caution"],
+    "mustWarnIfMissing": ["prior ECG comparison", "Sgarbossa assessment", "ischemic symptoms"],
+    "highRisk": true
+  },
+  {
+    "id": "qrs-lvh-001",
+    "category": "qrs",
+    "title": "LVH by voltage criteria",
+    "expectedRuleFindings": ["LVH voltage criteria", "strain pattern if entered", "hypertrophy caveat"],
+    "mustWarnIfMissing": ["blood pressure context", "echo correlation", "QRS duration"],
+    "highRisk": false
+  },
+  {
+    "id": "st-stemi-001",
+    "category": "ischemia",
+    "title": "ST elevation meeting STEMI criteria",
+    "expectedRuleFindings": ["ST elevation", "STEMI criteria met", "reciprocal changes if entered"],
+    "mustWarnIfMissing": ["symptom timing", "serial ECG", "troponin", "posterior/right-sided leads when relevant"],
+    "highRisk": true
+  },
+  {
+    "id": "st-mimic-001",
+    "category": "ischemia mimic",
+    "title": "Early repolarization mimic",
+    "expectedRuleFindings": ["ST elevation pattern", "mimic consideration", "no autonomous diagnosis"],
+    "mustWarnIfMissing": ["clinical symptoms", "prior ECG", "reciprocal changes"],
+    "highRisk": true
+  },
+  {
+    "id": "qt-long-001",
+    "category": "qt",
+    "title": "Marked QTc prolongation",
+    "expectedRuleFindings": ["prolonged QTc", "QT risk flagged", "medication/electrolyte review option"],
+    "mustWarnIfMissing": ["correction method", "heart rate", "QRS duration", "electrolytes", "medications"],
+    "highRisk": true
+  },
+  {
+    "id": "quality-incomplete-001",
+    "category": "incomplete data",
+    "title": "Insufficient data for interpretation",
+    "expectedRuleFindings": ["missing input warnings", "insufficient confidence", "no definitive rhythm diagnosis"],
+    "mustWarnIfMissing": ["rate", "P-wave assessment", "PR interval", "QRS duration", "ST-T assessment"],
+    "highRisk": false
+  }
+]

@@ -1,11 +1,12 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Palette, Radius } from '@/constants/design';
 
 interface OptionSelectProps {
   options: { label: string; value: string }[];
   selectedValue?: string;
-  onSelect: (value: string) => void;
+  onSelect?: (value: string) => void;
   multiSelect?: boolean;
   selectedValues?: string[];
   onToggleSelect?: (value: string) => void;
@@ -15,27 +16,25 @@ export function OptionSelect({ options, selectedValue, onSelect, multiSelect, se
   return (
     <View style={styles.container}>
       {options.map((opt) => {
-        const isSelected = multiSelect 
-          ? selectedValues?.includes(opt.value) 
-          : selectedValue === opt.value;
-          
+        const isSelected = multiSelect ? selectedValues?.includes(opt.value) : selectedValue === opt.value;
+
         return (
-          <TouchableOpacity
+          <Pressable
             key={opt.value}
             style={[styles.option, isSelected && styles.optionSelected]}
             onPress={() => {
               if (multiSelect && onToggleSelect) {
                 onToggleSelect(opt.value);
               } else {
-                onSelect(opt.value);
+                onSelect?.(opt.value);
               }
             }}
           >
             <View style={[styles.radio, multiSelect && styles.checkbox, isSelected && styles.radioSelected]}>
-              {isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}
+              {isSelected && <Ionicons name="checkmark" size={15} color={Palette.paper} />}
             </View>
             <Text style={[styles.label, isSelected && styles.labelSelected]}>{opt.label}</Text>
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
     </View>
@@ -44,45 +43,48 @@ export function OptionSelect({ options, selectedValue, onSelect, multiSelect, se
 
 const styles = StyleSheet.create({
   container: {
+    gap: 10,
     marginVertical: 16,
   },
   option: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: '#fff',
+    flexDirection: 'row',
+    padding: 15,
   },
   optionSelected: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    backgroundColor: Palette.primarySoft,
+    borderColor: Palette.primary,
   },
   radio: {
-    width: 24,
-    height: 24,
+    alignItems: 'center',
+    borderColor: Palette.lineStrong,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#cbd5e1',
-    marginRight: 12,
-    alignItems: 'center',
+    height: 24,
     justifyContent: 'center',
+    marginRight: 12,
+    width: 24,
   },
   checkbox: {
-    borderRadius: 6,
+    borderRadius: 7,
   },
   radioSelected: {
-    borderColor: '#2563eb',
-    backgroundColor: '#2563eb',
+    backgroundColor: Palette.primary,
+    borderColor: Palette.primary,
   },
   label: {
+    color: Palette.ink,
+    flex: 1,
     fontSize: 16,
-    color: '#334155',
+    fontWeight: '600',
   },
   labelSelected: {
-    color: '#1e40af',
-    fontWeight: '500',
-  }
+    color: Palette.primary,
+    fontWeight: '800',
+  },
 });

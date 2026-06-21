@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="220" fill="#07111F"/>
+  <rect x="154" y="154" width="716" height="716" rx="174" fill="#0E1A33" stroke="#21D4FD" stroke-opacity="0.35" stroke-width="8"/>
+  <path d="M182 532 H242 L266 500 L290 532 H344 L376 574 L408 367 L446 650 L479 532 H536 L582 474 L639 532 H711 L767 512 L830 532 H868" 
+        stroke="#21D4FD" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="682" cy="532" r="42" fill="#FF3B5C" stroke="#F8FAFC" stroke-width="8"/>
+  <text x="512" y="742" text-anchor="middle" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="94" font-weight="800">ECG</text>
+  <text x="512" y="810" text-anchor="middle" fill="#94A3B8" font-family="Inter, Arial, sans-serif" font-size="36" font-weight="500">MASTER</text>
+</svg>

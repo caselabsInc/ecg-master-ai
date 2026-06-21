@@ -1,144 +1,174 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useAuth } from '../../context/AuthContext';
-import { getUserReports, EcgReport } from '../../services/db';
+import { useAuth } from '@/context/AuthContext';
+import { EcgReport, getUserReports } from '@/services/db';
+import { ReportCard } from '@/components/report-card';
+import { Layout, Palette, Radius } from '@/constants/design';
 
 export default function ReportsList() {
   const { user } = useAuth();
   const router = useRouter();
   const [reports, setReports] = useState<EcgReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'completed' | 'draft'>('all');
 
   useEffect(() => {
     const fetchReports = async () => {
-      if (user) {
-        try {
-          const data = await getUserReports(user.uid);
-          setReports(data);
-        } catch (error) {
-          console.error('Error fetching reports:', error);
-        } finally {
-          setLoading(false);
-        }
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const data = await getUserReports(user.uid);
+        setReports(data);
+      } catch (error) {
+        console.error('Error fetching reports:', error);
+      } finally {
+        setLoading(false);
       }
     };
-    // Add listener to refresh on focus if needed, or just fetch once
+
     fetchReports();
   }, [user]);
 
-  const renderReportItem = ({ item }: { item: EcgReport }) => (
-    <TouchableOpacity 
-      style={styles.reportCard}
-      onPress={() => router.push(`/(ecg-flow)/results?id=${item.id}`)}
-    >
-      <View style={styles.reportHeader}>
-        <Text style={styles.reportDate}>
-          {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'Draft'}
-        </Text>
-        <View style={[styles.statusBadge, item.status === 'completed' ? styles.statusCompleted : styles.statusDraft]}>
-          <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-        </View>
-      </View>
-      <Text style={styles.reportContext}>
-        Age: {item.context?.age || 'N/A'} • Indication: {item.context?.indication || 'None'}
-      </Text>
-      {item.status === 'completed' && item.aiInterpretation?.summary && (
-        <Text style={styles.reportSummary} numberOfLines={2}>
-          {item.aiInterpretation.summary}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
+  const visibleReports = useMemo(() => {
+    if (filter === 'all') return reports;
+    return reports.filter((report) => report.status === filter);
+  }, [filter, reports]);
 
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#2563eb" />
+        <ActivityIndicator size="large" color={Palette.primary} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={reports}
-        renderItem={renderReportItem}
-        keyExtractor={(item) => item.id!}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No reports found.</Text>
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      data={visibleReports}
+      renderItem={({ item }) => (
+        <ReportCard report={item} onPress={() => router.push(`/(ecg-flow)/results?id=${item.id}`)} />
+      )}
+      keyExtractor={(item) => item.id!}
+      ItemSeparatorComponent={() => <View style={styles.separator} />}
+      ListHeaderComponent={
+        <View style={styles.header}>
+          <Text style={styles.title}>Report archive</Text>
+          <Text style={styles.subtitle}>Review completed ECG summaries and continue reports that are still in progress.</Text>
+
+          <View style={styles.filterRow}>
+            {(['all', 'completed', 'draft'] as const).map((item) => {
+              const selected = filter === item;
+              return (
+                <Pressable
+                  key={item}
+                  style={[styles.filterButton, selected && styles.filterButtonActive]}
+                  onPress={() => setFilter(item)}
+                >
+                  <Text style={[styles.filterText, selected && styles.filterTextActive]}>
+                    {item === 'all' ? 'All' : item === 'completed' ? 'Reviewed' : 'In progress'}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-        }
-      />
-    </View>
+        </View>
+      }
+      ListEmptyComponent={
+        <View style={styles.emptyState}>
+          <Ionicons name="file-tray-outline" size={30} color={Palette.primaryMuted} />
+          <Text style={styles.emptyTitle}>Nothing here yet</Text>
+          <Text style={styles.emptyText}>Reports matching this view will appear here.</Text>
+        </View>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    backgroundColor: Palette.canvas,
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   centered: {
+    alignItems: 'center',
+    backgroundColor: Palette.canvas,
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
   },
-  listContainer: {
-    padding: 16,
+  content: {
+    padding: Layout.pagePadding,
+    paddingBottom: 36,
   },
-  reportCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+  header: {
+    gap: 12,
+    paddingBottom: 18,
   },
-  reportHeader: {
+  title: {
+    color: Palette.ink,
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 34,
+  },
+  subtitle: {
+    color: Palette.muted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  filterRow: {
+    backgroundColor: '#ebe7dc',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 4,
+    padding: 4,
+  },
+  filterButton: {
     alignItems: 'center',
-    marginBottom: 8,
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    flex: 1,
+    paddingVertical: 10,
   },
-  reportDate: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#334155',
+  filterButtonActive: {
+    backgroundColor: Palette.paper,
+    boxShadow: '0 4px 12px rgba(17, 24, 39, 0.07)',
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  filterText: {
+    color: Palette.muted,
+    fontSize: 13,
+    fontWeight: '800',
   },
-  statusCompleted: {
-    backgroundColor: '#dcfce7',
+  filterTextActive: {
+    color: Palette.primary,
   },
-  statusDraft: {
-    backgroundColor: '#fef3c7',
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  reportContext: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 8,
-  },
-  reportSummary: {
-    fontSize: 14,
-    color: '#475569',
-    fontStyle: 'italic',
+  separator: {
+    height: 12,
   },
   emptyState: {
-    padding: 40,
     alignItems: 'center',
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 8,
+    padding: 30,
+  },
+  emptyTitle: {
+    color: Palette.ink,
+    fontSize: 16,
+    fontWeight: '800',
   },
   emptyText: {
-    color: '#64748b',
-  }
+    color: Palette.muted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
 });

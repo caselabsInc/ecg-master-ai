@@ -1,0 +1,9 @@
+<svg width="2400" height="720" viewBox="0 0 2400 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="2400" height="720" fill="#07111F"/>
+  <rect x="190" y="180" width="360" height="360" rx="76" fill="#0E1A33" stroke="#21D4FD" stroke-opacity="0.35" stroke-width="4"/>
+  <path d="M238 360 H280 L298 338 L316 360 H352 L374 388 L398 252 L424 438 L448 360 H488 L520 320 L560 360 H610 L648 346 L692 360" stroke="#21D4FD" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="590" cy="360" r="18" fill="#FF3B5C"/>
+  <text x="600" y="315" fill="#F8FAFC" font-family="Inter, Arial, sans-serif" font-size="150" font-weight="800">ECG-Master</text>
+  <text x="610" y="431" fill="#94A3B8" font-family="Inter, Arial, sans-serif" font-size="46" font-weight="400">Cardiac rhythm learning made visual</text>
+  <path d="M1175 520 H1235 L1260 488 L1282 520 H1334 L1365 562 L1396 355 L1434 638 L1468 520 H1524 L1570 462 L1628 520 H1699 L1756 500 L1818 520" stroke="#21D4FD" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

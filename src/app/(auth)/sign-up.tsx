@@ -1,22 +1,46 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, OAuthProvider, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../services/firebase';
 import { useAuth } from '../../context/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
+  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
+});
+
+function authErrorMessage(error: any) {
+  const code = error?.code || '';
+  if (code.includes('email-already-in-use')) return 'An account already exists for this email address.';
+  if (code.includes('invalid-email')) return 'Enter a valid email address.';
+  if (code.includes('weak-password')) return 'Use a stronger password with at least 6 characters.';
+  if (code.includes('network-request-failed')) return 'Network connection unavailable. Please try again when you are online.';
+  return 'Account creation could not be completed. Please try again.';
+}
 
 export default function SignUp() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isAppleAvailable, setIsAppleAvailable] = useState(false);
   const router = useRouter();
   const { refreshUserData } = useAuth();
 
+  useEffect(() => {
+    AppleAuthentication.isAvailableAsync().then(setIsAppleAvailable);
+  }, []);
+
   const handleSignUp = async () => {
     if (!email || !password || !name) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Missing information', 'Enter your name, email, and password to continue.');
       return;
     }
 
@@ -24,7 +48,6 @@ export default function SignUp() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Create user document in Firestore with isFirstLogin = true
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         email: userCredential.user.email,
         displayName: name,
@@ -33,101 +56,306 @@ export default function SignUp() {
       });
 
       await refreshUserData();
-      // Router will handle redirecting to onboarding
     } catch (error: any) {
-      Alert.alert('Sign Up Failed', error.message);
+      Alert.alert('Account setup unsuccessful', authErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleAuth = async () => {
+    try {
+      setLoading(true);
+      const csrf = Math.random().toString(36).substring(2, 15);
+      const nonce = Math.random().toString(36).substring(2, 10);
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce);
+
+      const appleCredential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        state: csrf,
+        nonce: hashedNonce,
+      });
+
+      const { identityToken } = appleCredential;
+      if (identityToken) {
+        const provider = new OAuthProvider('apple.com');
+        const credential = provider.credential({
+          idToken: identityToken,
+          rawNonce: nonce,
+        });
+        
+        const userCred = await signInWithCredential(auth, credential);
+        
+        const userDoc = await getDoc(doc(db, 'users', userCred.user.uid));
+        if (!userDoc.exists()) {
+           await setDoc(doc(db, 'users', userCred.user.uid), {
+             email: userCred.user.email,
+             displayName: appleCredential.fullName?.givenName || 'Apple User',
+             isFirstLogin: true,
+             createdAt: serverTimestamp()
+           });
+        }
+        await refreshUserData();
+      }
+    } catch (e: any) {
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple sign-up unavailable', authErrorMessage(e));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    try {
+      setLoading(true);
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      
+      const idToken = userInfo.data?.idToken || (userInfo as any).idToken;
+      
+      if (idToken) {
+        const credential = GoogleAuthProvider.credential(idToken);
+        const userCred = await signInWithCredential(auth, credential);
+        
+        const userDoc = await getDoc(doc(db, 'users', userCred.user.uid));
+        if (!userDoc.exists()) {
+           await setDoc(doc(db, 'users', userCred.user.uid), {
+             email: userCred.user.email,
+             displayName: userCred.user.displayName || 'Google User',
+             isFirstLogin: true,
+             createdAt: serverTimestamp()
+           });
+        }
+        await refreshUserData();
+      }
+    } catch (e: any) {
+      if (e.code !== 'ASYNC_OP_IN_PROGRESS' && e.code !== 'SIGN_IN_CANCELLED') {
+        Alert.alert('Google sign-up unavailable', authErrorMessage(e));
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
-      <Text style={styles.subtitle}>Sign up to start reading ECGs</Text>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.card}>
+          <View style={styles.headerContainer}>
+            <Image 
+              source={require('../../../assets/icon.png')} 
+              style={styles.logo} 
+              contentFit="contain" 
+            />
+            <Text style={styles.title}>Create account</Text>
+            <Text style={styles.subtitle}>Start structured ECG review for clinician education.</Text>
+          </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Full Name"
-        value={name}
-        onChangeText={setName}
-        autoCapitalize="words"
-      />
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#64748b" style={styles.icon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Full name"
+              placeholderTextColor="#94a3b8"
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+            />
+          </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
+          <View style={styles.inputContainer}>
+            <Ionicons name="mail-outline" size={20} color="#64748b" style={styles.icon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email address"
+              placeholderTextColor="#94a3b8"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+          </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.icon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#94a3b8"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+          </View>
 
-      <TouchableOpacity style={styles.button} onPress={handleSignUp} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Up</Text>}
-      </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={handleSignUp} disabled={loading}>
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create account</Text>}
+          </TouchableOpacity>
 
-      <TouchableOpacity style={styles.linkButton} onPress={() => router.back()}>
-        <Text style={styles.linkText}>Already have an account? Sign In</Text>
-      </TouchableOpacity>
-    </View>
+          <View style={styles.dividerContainer}>
+            <View style={styles.divider} />
+            <Text style={styles.dividerText}>or continue with</Text>
+            <View style={styles.divider} />
+          </View>
+
+          {isAppleAvailable && (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={16}
+              style={styles.appleButton}
+              onPress={handleAppleAuth}
+            />
+          )}
+
+          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleAuth} disabled={loading}>
+            <Ionicons name="logo-google" size={20} color="#0f172a" style={styles.googleIcon} />
+            <Text style={styles.googleButtonText}>Sign up with Google</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.linkButton} onPress={() => router.back()}>
+            <Text style={styles.linkText}>Already have an account? <Text style={styles.linkTextBold}>Sign in</Text></Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    backgroundColor: '#f1f5f9',
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 32,
+    shadowColor: '#0c172e',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  headerContainer: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    marginBottom: 24,
+    borderRadius: 20,
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    color: '#0c172e',
     marginBottom: 8,
     textAlign: 'center',
-    color: '#0f172a',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#64748b',
-    marginBottom: 32,
     textAlign: 'center',
   },
-  input: {
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
-    borderColor: '#cbd5e1',
-    borderRadius: 8,
-    padding: 16,
+    borderColor: '#e2e8f0',
+    borderRadius: 16,
     marginBottom: 16,
+    paddingHorizontal: 16,
+    height: 56,
+  },
+  icon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
     fontSize: 16,
+    color: '#334155',
   },
   button: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#0c172e',
+    height: 56,
+    borderRadius: 16,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 8,
+    shadowColor: '#0c172e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e2e8f0',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  appleButton: {
+    height: 56,
+    marginBottom: 16,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  googleIcon: {
+    marginRight: 12,
+  },
+  googleButtonText: {
+    color: '#0f172a',
+    fontSize: 17,
     fontWeight: '600',
   },
   linkButton: {
-    marginTop: 20,
+    marginTop: 32,
     alignItems: 'center',
   },
   linkText: {
-    color: '#2563eb',
-    fontSize: 14,
+    color: '#64748b',
+    fontSize: 15,
+  },
+  linkTextBold: {
+    color: '#0c172e',
+    fontWeight: '700',
   },
 });

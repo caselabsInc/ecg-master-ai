@@ -1,102 +1,244 @@
-import React, { useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useEcgStore } from '../../store/ecgStore';
-import { FlowButtons } from '../../components/FlowButtons';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { FlowFooter, FlowHero, SectionHeader, flowStyles } from '@/components/ecg-flow-ui';
+import { LearnableText, useLearningSheet } from '@/components/ecg-learning-sheet';
+import { Palette, Radius } from '@/constants/design';
+import { useEcgStore } from '@/store/ecgStore';
 
 export default function Step10() {
-  const router = useRouter();
   const { draft, updateDraft } = useEcgStore();
+  const learning = useLearningSheet();
   const qtInterval = draft.qtInterval || {};
   const heartRate = draft.heartRate?.calculatedBpm;
+  const rrIntervalMs = heartRate ? Math.round(60000 / heartRate) : undefined;
 
-  const handleNext = () => {
-    router.push('/(ecg-flow)/step-11');
-  };
+  const handleChange = (text: string) => {
+    const boxes = parseFloat(text);
+    const smallBoxes = Number.isFinite(boxes) ? boxes : undefined;
+    const qtMs = smallBoxes !== undefined ? Math.round(smallBoxes * 40) : undefined;
+    const rrSeconds = heartRate ? 60 / heartRate : undefined;
+    const qtcBazettMs = qtMs && rrSeconds ? Math.round(qtMs / Math.sqrt(rrSeconds)) : undefined;
+    const qtcFridericiaMs = qtMs && rrSeconds ? Math.round(qtMs / Math.cbrt(rrSeconds)) : undefined;
+    const qtcFraminghamMs = qtMs && heartRate ? Math.round(qtMs + 154 * (1 - 60 / heartRate)) : undefined;
+    const qrsMs = draft.qrsComplex?.calculatedMs;
+    const jtMs = qtMs && qrsMs ? qtMs - qrsMs : null;
+    const jtcMs = qtcFridericiaMs && qrsMs ? qtcFridericiaMs - qrsMs : null;
+    const primaryQtc = qtcFridericiaMs || qtcBazettMs;
+    const qtRisk =
+      primaryQtc === undefined
+        ? undefined
+        : primaryQtc < 350
+          ? 'short'
+          : primaryQtc < 450
+            ? 'normal'
+            : primaryQtc < 480
+              ? 'borderline_long'
+              : primaryQtc < 500
+                ? 'long'
+                : 'markedly_long';
 
-  const handleChange = (val: string) => {
-    const boxes = parseFloat(val);
-    const qtMs = isNaN(boxes) ? undefined : boxes * 40;
-    
-    let qtcMs: number | undefined = undefined;
-
-    if (qtMs && heartRate) {
-      // Bazett's formula: QTc = QT / sqrt(RR in seconds)
-      const rrSeconds = 60 / heartRate;
-      qtcMs = Math.round(qtMs / Math.sqrt(rrSeconds));
-    }
-
-    updateDraft({ 
-      qtInterval: { 
-        smallBoxes: isNaN(boxes) ? undefined : boxes,
+    updateDraft({
+      qtInterval: {
+        smallBoxes,
         calculatedQtMs: qtMs,
-        calculatedQtcMs: qtcMs
-      } 
+        calculatedQtcMs: primaryQtc,
+        qtcBazettMs,
+        qtcFridericiaMs,
+        qtcFraminghamMs,
+        jtMs,
+        jtcMs,
+        qtRisk,
+        correctionMethod: 'fridericia',
+      },
     });
   };
 
   const isValid = qtInterval.smallBoxes !== undefined;
+  const summary = qtInterval.calculatedQtcMs !== undefined ? `${qtInterval.calculatedQtcMs} ms QTc` : 'Awaiting QT measurement';
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Step 10: QT Interval</Text>
-        <Text style={styles.subtitle}>Measure from the start of the Q wave to the end of the T wave.</Text>
-        
-        <View style={styles.field}>
-          <Text style={styles.label}>Number of small boxes</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. 10"
-            keyboardType="decimal-pad"
-            value={qtInterval.smallBoxes?.toString() || ''}
-            onChangeText={handleChange}
+    <View style={flowStyles.screen}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={flowStyles.scrollContent} showsVerticalScrollIndicator={false}>
+        <FlowHero
+          step={10}
+          label="Step 10 · QT interval"
+          title="Measure QT and correct it against heart rate."
+          progress="83%"
+          summaryLabel="QT read"
+          summary={summary}
+          pills={[
+            { label: 'QT', complete: qtInterval.calculatedQtMs !== undefined },
+            { label: 'QTc', complete: qtInterval.calculatedQtcMs !== undefined },
+          ]}
+          learnTopicId="step.qtInterval"
+          onOpenLearning={learning.openTopic}
+        />
+
+        <View style={flowStyles.card}>
+          <SectionHeader
+            icon="resize-outline"
+            title="QT measurement"
+            detail="Measure from the start of QRS to the end of the T wave, then count small boxes."
           />
+          <LearnableText topicId="step.qtInterval" onOpen={learning.openTopic} style={styles.inputLabel}>QT small boxes</LearnableText>
+          <View style={styles.inputShell}>
+            <TextInput
+              style={styles.input}
+              placeholder="10"
+              placeholderTextColor={Palette.subtle}
+              keyboardType="decimal-pad"
+              value={qtInterval.smallBoxes?.toString() || ''}
+              onChangeText={handleChange}
+            />
+            <View style={styles.unitPill}>
+              <Text style={styles.unitText}>small boxes</Text>
+            </View>
+          </View>
         </View>
 
-        {qtInterval.calculatedQtMs !== undefined && (
-          <View style={styles.resultBox}>
-            <Text style={styles.resultLabel}>Calculated QT Interval</Text>
-            <Text style={styles.resultValue}>{qtInterval.calculatedQtMs} ms</Text>
-            
-            {qtInterval.calculatedQtcMs !== undefined ? (
-              <>
-                <View style={styles.divider} />
-                <Text style={styles.resultLabel}>Calculated QTc (Bazett's)</Text>
-                <Text style={styles.resultValue}>{qtInterval.calculatedQtcMs} ms</Text>
-                {(qtInterval.calculatedQtcMs > 450) && (
-                  <Text style={styles.resultWarning}>
-                    Prolonged QTc flag (>450ms)
-                  </Text>
-                )}
-              </>
-            ) : (
-              <Text style={styles.noteText}>Heart rate not available to calculate QTc.</Text>
-            )}
+        <View style={styles.resultGrid}>
+          <View style={styles.resultCard}>
+            <Text style={styles.resultLabel}>QT</Text>
+            <Text style={styles.resultValue} selectable>
+              {qtInterval.calculatedQtMs ?? '--'} <Text style={styles.resultUnit}>ms</Text>
+            </Text>
           </View>
-        )}
+          <View style={[styles.resultCard, styles.resultPrimary]}>
+            <Text style={styles.resultLabelPrimary}>QTc Bazett</Text>
+            <Text style={styles.resultValuePrimary} selectable>
+              {qtInterval.calculatedQtcMs ?? '--'} <Text style={styles.resultUnitPrimary}>ms</Text>
+            </Text>
+          </View>
+        </View>
 
+        <View style={flowStyles.card}>
+          <SectionHeader
+            icon="calculator-outline"
+            title="Correction methods and risk"
+            detail="Fridericia is used as the primary QTc here; Bazett remains visible because clinicians commonly expect it."
+          />
+          <View style={styles.referenceRow}>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>Bazett</Text>
+              <Text style={styles.referenceValue}>{qtInterval.qtcBazettMs ?? '--'} ms</Text>
+            </View>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>Fridericia</Text>
+              <Text style={styles.referenceValue}>{qtInterval.qtcFridericiaMs ?? '--'} ms</Text>
+            </View>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>Framingham</Text>
+              <Text style={styles.referenceValue}>{qtInterval.qtcFraminghamMs ?? '--'} ms</Text>
+            </View>
+          </View>
+          <View style={styles.referenceRow}>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>JT</Text>
+              <Text style={styles.referenceValue}>{qtInterval.jtMs ?? '--'} ms</Text>
+            </View>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>JTc</Text>
+              <Text style={styles.referenceValue}>{qtInterval.jtcMs ?? '--'} ms</Text>
+            </View>
+            <View style={[styles.referenceItem, qtInterval.qtRisk === 'markedly_long' && styles.riskItem]}>
+              <Text style={styles.referenceLabel}>Risk</Text>
+              <Text style={styles.referenceValue}>{qtInterval.qtRisk?.replace('_', ' ') || '--'}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={flowStyles.card}>
+          <SectionHeader
+            icon="heart-outline"
+            title="Correction reference"
+            detail="Bazett correction uses the R-R interval derived from the heart rate entered earlier."
+          />
+          <View style={styles.referenceRow}>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>Heart rate</Text>
+              <Text style={styles.referenceValue}>{heartRate ?? '--'} bpm</Text>
+            </View>
+            <View style={styles.referenceItem}>
+              <Text style={styles.referenceLabel}>R-R interval</Text>
+              <Text style={styles.referenceValue}>{rrIntervalMs ?? '--'} ms</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.tipPanel}>
+          <Ionicons name="information-circle-outline" size={20} color={Palette.success} />
+          <Text style={styles.tipText}>
+            A prolonged QTc increases risk for ventricular arrhythmias. Always check medications, potassium, magnesium,
+            and calcium.
+          </Text>
+        </View>
       </ScrollView>
-      <View style={styles.footer}>
-        <FlowButtons onNext={handleNext} isValid={isValid} />
-      </View>
+      {learning.sheet}
+      <FlowFooter isValid={isValid} disabledLabel="Complete QT" nextHref="/(ecg-flow)/step-11" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scrollContent: { padding: 24, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#0f172a', marginBottom: 8 },
-  subtitle: { fontSize: 16, color: '#64748b', marginBottom: 24 },
-  field: { marginBottom: 24 },
-  label: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 12, fontSize: 16, backgroundColor: '#f8fafc' },
-  footer: { paddingHorizontal: 24, borderTopWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#fff' },
-  resultBox: { padding: 16, backgroundColor: '#eff6ff', borderRadius: 8, marginTop: 16, alignItems: 'center' },
-  resultLabel: { fontSize: 14, color: '#1e40af', marginBottom: 4 },
-  resultValue: { fontSize: 24, fontWeight: 'bold', color: '#1d4ed8' },
-  resultWarning: { color: '#dc2626', fontSize: 12, marginTop: 8, fontWeight: '500' },
-  divider: { height: 1, backgroundColor: '#bfdbfe', width: '100%', marginVertical: 12 },
-  noteText: { color: '#64748b', fontSize: 12, marginTop: 8 }
+  inputLabel: { color: Palette.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  inputShell: {
+    alignItems: 'center',
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 58,
+    paddingHorizontal: 14,
+  },
+  input: { color: Palette.ink, flex: 1, fontSize: 22, fontVariant: ['tabular-nums'], fontWeight: '900' },
+  unitPill: { backgroundColor: Palette.primarySoft, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  unitText: { color: Palette.primary, fontSize: 12, fontWeight: '900' },
+  resultGrid: { flexDirection: 'row', gap: 12 },
+  resultCard: {
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    boxShadow: Palette.smallShadow,
+    flex: 1,
+    gap: 8,
+    padding: 16,
+  },
+  resultPrimary: { backgroundColor: Palette.primary, borderColor: Palette.primary },
+  resultLabel: { color: Palette.muted, fontSize: 12, fontWeight: '900', textTransform: 'uppercase' },
+  resultLabelPrimary: { color: '#cfe6e2', fontSize: 12, fontWeight: '900', textTransform: 'uppercase' },
+  resultValue: { color: Palette.ink, fontSize: 24, fontVariant: ['tabular-nums'], fontWeight: '900' },
+  resultValuePrimary: { color: Palette.paper, fontSize: 24, fontVariant: ['tabular-nums'], fontWeight: '900' },
+  resultUnit: { fontSize: 13, fontWeight: '900' },
+  resultUnitPrimary: { fontSize: 13, fontWeight: '900' },
+  referenceRow: { flexDirection: 'row', gap: 10 },
+  referenceItem: {
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flex: 1,
+    gap: 5,
+    padding: 13,
+  },
+  referenceLabel: { color: Palette.muted, fontSize: 12, fontWeight: '900' },
+  referenceValue: { color: Palette.primary, fontSize: 17, fontVariant: ['tabular-nums'], fontWeight: '900' },
+  riskItem: { backgroundColor: Palette.accentSoft, borderColor: '#e8b9b2' },
+  tipPanel: {
+    alignItems: 'flex-start',
+    backgroundColor: Palette.successSoft,
+    borderColor: '#c5e4d8',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+  },
+  tipText: { color: '#255a49', flex: 1, fontSize: 13, fontWeight: '700', lineHeight: 19 },
 });

@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { Palette, Radius } from '@/constants/design';
 
 interface FlowButtonsProps {
   onNext: () => void;
@@ -15,22 +16,15 @@ export function FlowButtons({ onNext, nextLabel = 'Next', isLast = false, isVali
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity 
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
-        <Ionicons name="arrow-back" size={20} color="#64748b" />
+      <Pressable style={styles.backButton} onPress={() => router.back()}>
+        <Ionicons name="arrow-back" size={18} color={Palette.primary} />
         <Text style={styles.backText}>Back</Text>
-      </TouchableOpacity>
+      </Pressable>
 
-      <TouchableOpacity 
-        style={[styles.nextButton, !isValid && styles.disabledButton]}
-        onPress={onNext}
-        disabled={!isValid}
-      >
+      <Pressable style={[styles.nextButton, !isValid && styles.disabledButton]} onPress={onNext} disabled={!isValid}>
         <Text style={styles.nextText}>{nextLabel}</Text>
-        {!isLast && <Ionicons name="arrow-forward" size={20} color="#fff" />}
-      </TouchableOpacity>
+        {!isLast && <Ionicons name="arrow-forward" size={18} color={Palette.paper} />}
+      </Pressable>
     </View>
   );
 }
@@ -38,38 +32,43 @@ export function FlowButtons({ onNext, nextLabel = 'Next', isLast = false, isVali
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    gap: 12,
     justifyContent: 'space-between',
-    paddingVertical: 24,
     marginTop: 'auto',
+    paddingVertical: 24,
   },
   backButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    backgroundColor: Palette.paper,
+    borderColor: Palette.lineStrong,
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
     paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#f1f5f9',
+    paddingVertical: 13,
   },
   backText: {
-    color: '#64748b',
-    marginLeft: 8,
-    fontWeight: '600',
+    color: Palette.primary,
+    fontWeight: '800',
   },
   nextButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    backgroundColor: Palette.primary,
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    flexDirection: 'row',
+    gap: 8,
     paddingHorizontal: 24,
-    borderRadius: 8,
-    backgroundColor: '#2563eb',
+    paddingVertical: 13,
   },
   disabledButton: {
-    backgroundColor: '#94a3b8',
+    backgroundColor: Palette.subtle,
   },
   nextText: {
-    color: '#fff',
-    marginRight: 8,
-    fontWeight: '600',
+    color: Palette.paper,
     fontSize: 16,
-  }
+    fontWeight: '800',
+  },
 });

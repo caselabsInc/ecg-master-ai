@@ -21,6 +21,7 @@ const initialDraft: Partial<EcgReport> = {
   stSegment: {},
   tWaves: {},
   qtInterval: {},
+  lateWaveFindings: {},
   uWaves: {},
 };
 

@@ -1,44 +1,76 @@
 {
   "expo": {
-    "name": "ecgmaster",
+    "name": "ECG-Master",
     "slug": "ecgmaster",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icon.png",
     "scheme": "ecgmaster",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/icon.png",
+      "bundleIdentifier": "com.caselabs.ecgmaster",
+      "buildNumber": "2",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.caselabs.ecgmaster",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon-foreground.png",
+        "backgroundImage": "./assets/adaptive-icon-background.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+          "backgroundColor": "#063b3b",
+          "image": "./assets/splash-iphone-1290x2796.png",
+          "imageWidth": 430,
+          "resizeMode": "cover",
+          "enableFullScreenImage_legacy": true,
+          "dark": {
+            "backgroundColor": "#063b3b",
+            "image": "./assets/splash-iphone-1290x2796.png"
           }
         }
-      ]
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.984586118056-nn43bqm9l3sbn0en5ronsfeivpocqb2p"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a6117005-4872-45e9-b8d6-c7f846877f7c"
+      }
     }
   }
 }

@@ -1,0 +1,38 @@
+{
+  "app_name": "ECG-Master",
+  "tagline": "AI ECG interpretation training",
+  "positioning": "Premium AI-assisted ECG interpretation and training app for clinicians, medical students, residents, and practitioners.",
+  "colors": {
+    "obsidian": "#07111F",
+    "midnight": "#0B1630",
+    "deep_navy": "#101B3D",
+    "electric_cyan": "#21D4FD",
+    "clinical_blue": "#2563EB",
+    "cardiac_red": "#FF3B5C",
+    "mint_ok": "#34D399",
+    "soft_white": "#F8FAFC",
+    "slate": "#94A3B8",
+    "panel": "#0E1A33"
+  },
+  "recommended_type": {
+    "primary": "Inter / SF Pro / Roboto",
+    "fallback": "System UI"
+  },
+  "asset_files": [
+    "adaptive-icon-background.png",
+    "adaptive-icon-foreground.png",
+    "favicon.png",
+    "icon.png",
+    "ios-icon-1024.png",
+    "logo-mark-transparent.png",
+    "logo-mark.svg",
+    "onboarding-hero-1080x1920.png",
+    "play-store-feature-graphic-1024x500.png",
+    "play-store-icon-512.png",
+    "social-preview-1200x630.png",
+    "splash-dark-1290x2796.png",
+    "splash-light-1290x2796.png",
+    "wordmark-dark-text.png",
+    "wordmark-light-text.png"
+  ]
+}

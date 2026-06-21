@@ -1,232 +1,325 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../../context/AuthContext';
-import { getUserReports, EcgReport } from '../../services/db';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/AuthContext';
+import { EcgReport, getUserReports } from '@/services/db';
+import { Layout, Palette, Radius } from '@/constants/design';
+import { ReportCard } from '@/components/report-card';
+import { EcgReferenceView } from '@/components/ecg-reference-view';
 
 export default function Home() {
   const { userData, user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [reports, setReports] = useState<EcgReport[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchReports = async () => {
-      if (user) {
-        try {
-          const data = await getUserReports(user.uid);
-          setReports(data);
-        } catch (error) {
-          console.error('Error fetching reports:', error);
-        } finally {
-          setLoading(false);
-        }
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const data = await getUserReports(user.uid);
+        setReports(data);
+      } catch (error) {
+        console.error('Error fetching reports:', error);
+      } finally {
+        setLoading(false);
       }
     };
+
     fetchReports();
   }, [user]);
 
-  const renderReportItem = ({ item }: { item: EcgReport }) => (
-    <TouchableOpacity 
-      style={styles.reportCard}
-      onPress={() => router.push(`/(ecg-flow)/results?id=${item.id}`)}
-    >
-      <View style={styles.reportHeader}>
-        <Text style={styles.reportDate}>
-          {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'Draft'}
-        </Text>
-        <View style={[styles.statusBadge, item.status === 'completed' ? styles.statusCompleted : styles.statusDraft]}>
-          <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-        </View>
-      </View>
-      <Text style={styles.reportContext}>
-        Age: {item.context?.age || 'N/A'} • Indication: {item.context?.indication || 'None'}
-      </Text>
-      {item.status === 'completed' && item.aiInterpretation?.summary && (
-        <Text style={styles.reportSummary} numberOfLines={2}>
-          {item.aiInterpretation.summary}
-        </Text>
-      )}
-    </TouchableOpacity>
-  );
+  const completedCount = useMemo(() => reports.filter((report) => report.status === 'completed').length, [reports]);
+  const inProgressCount = reports.length - completedCount;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>Hello, {userData?.displayName || 'Clinician'}</Text>
-        <Text style={styles.subtitle}>Ready to read some ECGs?</Text>
-      </View>
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + 12,
+          paddingBottom: Math.max(36, insets.bottom + 24),
+        },
+      ]}
+      data={reports.slice(0, 3)}
+      keyExtractor={(item) => item.id!}
+      renderItem={({ item }) => (
+        <ReportCard report={item} onPress={() => router.push(`/(ecg-flow)/results?id=${item.id}`)} />
+      )}
+      ItemSeparatorComponent={() => <View style={styles.separator} />}
+      ListHeaderComponent={
+        <View style={styles.headerContent}>
+          <View style={styles.hero}>
+            <View style={styles.heroTopRow}>
+              <Text style={styles.kicker}>ECG-Master</Text>
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>Ready</Text>
+              </View>
+            </View>
+            <Text style={styles.greeting}>Good to see you, {userData?.displayName || 'Clinician'}</Text>
 
-      <TouchableOpacity 
-        style={styles.newReadingCard}
-        onPress={() => router.push('/(ecg-flow)/pre-step')}
-      >
-        <View style={styles.iconContainer}>
-          <Ionicons name="pulse" size={32} color="#fff" />
-        </View>
-        <View style={styles.newReadingTextContainer}>
-          <Text style={styles.newReadingTitle}>New ECG Reading</Text>
-          <Text style={styles.newReadingSubtitle}>Start a step-by-step guided interpretation</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={24} color="#fff" />
-      </TouchableOpacity>
+            <View style={styles.tracePanel}>
+              <View style={styles.traceGrid}>
+                <EcgReferenceView variant="heart-rate" />
+              </View>
+              <Text style={styles.traceCaption}>Guided 12-step interpretation</Text>
+            </View>
 
-      <View style={styles.reportsSection}>
-        <View style={styles.reportsHeader}>
-          <Text style={styles.sectionTitle}>Recent Reports</Text>
-          <TouchableOpacity onPress={() => router.push('/(tabs)/reports')}>
-            <Text style={styles.seeAllText}>See All</Text>
-          </TouchableOpacity>
-        </View>
+            <Pressable style={styles.primaryAction} onPress={() => router.push('/(ecg-flow)/pre-step')}>
+              <View style={styles.primaryIcon}>
+                <Ionicons name="add" size={22} color={Palette.primary} />
+              </View>
+              <View style={styles.primaryCopy}>
+                <Text style={styles.primaryTitle}>Start new ECG</Text>
+                <Text style={styles.primarySubtitle}>Document context, measurements, and interpretation support.</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={20} color={Palette.paper} />
+            </Pressable>
+          </View>
 
-        {loading ? (
-          <ActivityIndicator style={{ marginTop: 32 }} />
-        ) : reports.length > 0 ? (
-          <FlatList
-            data={reports.slice(0, 3)}
-            renderItem={renderReportItem}
-            keyExtractor={(item) => item.id!}
-            scrollEnabled={false}
-          />
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue} selectable>
+                {reports.length}
+              </Text>
+              <Text style={styles.statLabel}>Reports</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue} selectable>
+                {completedCount}
+              </Text>
+              <Text style={styles.statLabel}>Reviewed</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue} selectable>
+                {inProgressCount}
+              </Text>
+              <Text style={styles.statLabel}>In progress</Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent reports</Text>
+            <Pressable style={styles.textButton} onPress={() => router.push('/(tabs)/reports')}>
+              <Text style={styles.textButtonLabel}>View all</Text>
+              <Ionicons name="arrow-forward" size={14} color={Palette.primary} />
+            </Pressable>
+          </View>
+        </View>
+      }
+      ListEmptyComponent={
+        loading ? (
+          <ActivityIndicator color={Palette.primary} style={styles.loader} />
         ) : (
           <View style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={48} color="#cbd5e1" />
-            <Text style={styles.emptyStateText}>No reports yet. Start a new reading above!</Text>
+            <Ionicons name="document-text-outline" size={28} color={Palette.primaryMuted} />
+            <Text style={styles.emptyTitle}>No reports yet</Text>
+            <Text style={styles.emptyText}>Completed ECG reviews and works in progress will appear here.</Text>
           </View>
-        )}
-      </View>
-    </View>
+        )
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    backgroundColor: Palette.canvas,
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
-  header: {
-    padding: 24,
-    paddingTop: 32,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+  content: {
+    gap: 0,
+    padding: Layout.pagePadding,
+    paddingBottom: 36,
+  },
+  headerContent: {
+    gap: 18,
+  },
+  hero: {
+    backgroundColor: Palette.primary,
+    borderCurve: 'continuous',
+    borderRadius: Radius.xl,
+    boxShadow: Palette.shadow,
+    gap: 18,
+    overflow: 'hidden',
+    padding: 20,
+  },
+  heroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  kicker: {
+    color: '#b9d8d4',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#0f172a',
-    marginBottom: 4,
+    color: Palette.paper,
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 33,
+    maxWidth: 360,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#64748b',
-  },
-  newReadingCard: {
-    margin: 20,
-    backgroundColor: '#2563eb',
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
+  liveBadge: {
     alignItems: 'center',
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: 'rgba(255, 253, 248, 0.12)',
+    borderColor: 'rgba(255, 253, 248, 0.18)',
+    borderRadius: 999,
+    borderWidth: 1,
+    flexShrink: 0,
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
-  iconContainer: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    padding: 12,
-    borderRadius: 12,
+  liveDot: {
+    backgroundColor: '#9be3c7',
+    borderRadius: 999,
+    height: 7,
+    width: 7,
   },
-  newReadingTextContainer: {
-    flex: 1,
-    marginLeft: 16,
+  liveText: {
+    color: Palette.paper,
+    fontSize: 12,
+    fontWeight: '700',
   },
-  newReadingTitle: {
-    color: '#fff',
-    fontSize: 18,
+  tracePanel: {
+    backgroundColor: 'rgba(255, 253, 248, 0.1)',
+    borderColor: 'rgba(255, 253, 248, 0.16)',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 8,
+    padding: 14,
+  },
+  traceGrid: {
+    backgroundColor: '#f7e8df',
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    height: 148,
+    overflow: 'hidden',
+  },
+  traceCaption: {
+    color: '#d7ebe8',
+    fontSize: 13,
     fontWeight: '600',
-    marginBottom: 4,
   },
-  newReadingSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
+  primaryAction: {
+    alignItems: 'center',
+    backgroundColor: Palette.accent,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
   },
-  reportsSection: {
+  primaryIcon: {
+    alignItems: 'center',
+    backgroundColor: Palette.paper,
+    borderRadius: 999,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  primaryCopy: {
     flex: 1,
-    paddingHorizontal: 20,
+    gap: 2,
   },
-  reportsHeader: {
+  primaryTitle: {
+    color: Palette.paper,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  primarySubtitle: {
+    color: '#f9dad6',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statCard: {
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flex: 1,
+    gap: 3,
+    padding: 14,
+  },
+  statValue: {
+    color: Palette.ink,
+    fontSize: 22,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '800',
+  },
+  statLabel: {
+    color: Palette.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  sectionHeader: {
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+    paddingTop: 4,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0f172a',
+    color: Palette.ink,
+    fontSize: 19,
+    fontWeight: '800',
   },
-  seeAllText: {
-    color: '#2563eb',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  reportCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  reportHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  textButton: {
     alignItems: 'center',
-    marginBottom: 8,
+    flexDirection: 'row',
+    gap: 5,
+    padding: 8,
   },
-  reportDate: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#334155',
+  textButtonLabel: {
+    color: Palette.primary,
+    fontSize: 13,
+    fontWeight: '800',
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  separator: {
+    height: 12,
   },
-  statusCompleted: {
-    backgroundColor: '#dcfce7',
-  },
-  statusDraft: {
-    backgroundColor: '#fef3c7',
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  reportContext: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 8,
-  },
-  reportSummary: {
-    fontSize: 14,
-    color: '#475569',
-    fontStyle: 'italic',
+  loader: {
+    padding: 32,
   },
   emptyState: {
-    padding: 40,
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 8,
+    padding: 28,
   },
-  emptyStateText: {
-    marginTop: 16,
-    color: '#64748b',
+  emptyTitle: {
+    color: Palette.ink,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  emptyText: {
+    color: Palette.muted,
+    fontSize: 13,
     textAlign: 'center',
-  }
+  },
 });

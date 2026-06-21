@@ -1,55 +1,74 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEcgStore } from '../../store/ecgStore';
-import { FlowButtons } from '../../components/FlowButtons';
-import { useAuth } from '../../context/AuthContext';
-import { saveReportDraft, completeReport } from '../../services/db';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '../../services/firebase';
+import { FlowHero, SectionHeader, flowStyles } from '@/components/ecg-flow-ui';
+import { LearnableText, useLearningSheet } from '@/components/ecg-learning-sheet';
+import { Layout, Palette, Radius } from '@/constants/design';
+import { useAuth } from '@/context/AuthContext';
+import { app } from '@/services/firebase';
+import { normalizeAiInterpretation } from '@/services/aiInterpretation';
+import { buildDecisionSupportAudit } from '@/services/decisionSupportAudit';
+import { completeReport, markReportAiFailed, saveReportDraft } from '@/services/db';
+import { useEcgStore } from '@/store/ecgStore';
 
 export default function Step12() {
   const router = useRouter();
   const { draft, updateDraft, reportId, setReportId, resetDraft } = useEcgStore();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const learning = useLearningSheet();
 
   const handleSubmit = async () => {
     if (!user) {
-      Alert.alert('Error', 'You must be logged in to submit.');
+      Alert.alert('Sign-in required', 'Please sign in to save this ECG report.');
       return;
     }
 
     setLoading(true);
     try {
-      // 1. Save draft one last time to ensure we have the ID and latest data
-      const savedId = await saveReportDraft(user.uid, draft, reportId || undefined);
+      const auditedDraft = {
+        ...draft,
+        decisionSupport: buildDecisionSupportAudit(draft),
+      };
+      const savedId = await saveReportDraft(user.uid, auditedDraft, reportId || undefined);
       if (!reportId) {
         setReportId(savedId);
       }
 
-      // 2. Call Gemini API via Firebase Cloud Functions
       const functions = getFunctions(app);
       const generateInterpretation = httpsCallable(functions, 'generateECGInterpretation');
-      
-      const response = await generateInterpretation({
-        reportData: draft
-      });
 
-      const aiData = (response.data as any).interpretation;
+      let aiData;
+      try {
+        const response = await generateInterpretation({
+          reportData: auditedDraft,
+        });
+        aiData = normalizeAiInterpretation(response.data);
+        if (!aiData) {
+          throw new Error('Interpretation support could not be generated from the saved ECG review.');
+        }
+      } catch (funcError: any) {
+        console.warn('Firebase function failed.', funcError);
+        await markReportAiFailed(user.uid, savedId, {
+          code: funcError?.code,
+          message: 'Interpretation support could not be generated for this report.',
+        });
+        resetDraft();
+        router.replace(`/(ecg-flow)/results?id=${savedId}`);
+        return;
+      }
 
-      // 3. Mark as complete in Firestore
       await completeReport(user.uid, savedId, aiData);
 
-      // 4. Navigate to results
       resetDraft();
       router.replace(`/(ecg-flow)/results?id=${savedId}`);
-
     } catch (error: any) {
       console.error('Submission error:', error);
       Alert.alert(
-        'Interpretation Failed', 
-        'Could not generate AI interpretation at this time. Your data is saved as a draft. You can try again later.'
+        'Report could not be saved',
+        'The ECG data could not be saved. Please check your connection and try again.'
       );
     } finally {
       setLoading(false);
@@ -57,70 +76,202 @@ export default function Step12() {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Step 12: Additional Notes</Text>
-        <Text style={styles.subtitle}>Add any other observations or clinical context.</Text>
-        
-        <View style={styles.field}>
-          <Text style={styles.label}>Notes (Optional)</Text>
+    <View style={flowStyles.screen}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={flowStyles.scrollContent} showsVerticalScrollIndicator={false}>
+        <FlowHero
+          step={12}
+          label="Step 12 · Final review"
+          title="Add final context and prepare interpretation support."
+          progress="100%"
+          summaryLabel="Report status"
+          summary={loading ? 'Preparing interpretation support' : 'Ready for final review'}
+          pills={[
+            { label: 'ECG data', complete: true },
+            { label: 'Notes', complete: !!draft.additionalNotes },
+          ]}
+          learnTopicId="step.finalReview"
+          onOpenLearning={learning.openTopic}
+        />
+
+        <View style={flowStyles.card}>
+          <SectionHeader
+            icon="create-outline"
+            title="Additional observations"
+            detail="Add symptoms, clinical context, or tracing nuance that was not captured in the structured steps."
+          />
+          <LearnableText topicId="step.finalReview" onOpen={learning.openTopic} style={styles.inputLabel}>Clinical context note</LearnableText>
           <TextInput
             style={styles.textArea}
-            placeholder="e.g. Patient experienced chest pain during the scan..."
+            placeholder="Chest pain duration, comparison with prior ECG, medications, electrolytes, or other relevant context..."
+            placeholderTextColor={Palette.subtle}
             multiline
             numberOfLines={6}
             textAlignVertical="top"
             value={draft.additionalNotes || ''}
-            onChangeText={(val) => updateDraft({ additionalNotes: val })}
+            onChangeText={(additionalNotes) => updateDraft({ additionalNotes })}
           />
         </View>
 
+        <View style={styles.synthesisCard}>
+          <View style={styles.synthesisIcon}>
+            <Ionicons name="sparkles-outline" size={22} color={Palette.paper} />
+          </View>
+          <View style={styles.synthesisCopy}>
+          <Text style={styles.synthesisTitle}>Interpretation synthesis</Text>
+          <Text style={styles.synthesisText}>
+              ECG-Master will save the clinician-entered measurements, preserve the review basis, prepare interpretation support, and open the report for clinician review.
+          </Text>
+          </View>
+        </View>
+
+        <View style={styles.reviewGrid}>
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewLabel}>Rhythm</Text>
+            <Text style={styles.reviewValue}>
+              {draft.rhythm?.rhythmCategory ? draft.rhythm.rhythmCategory.replaceAll('_', ' ') : 'Pending'}
+            </Text>
+          </View>
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewLabel}>Rate</Text>
+            <Text style={styles.reviewValue}>{draft.heartRate?.calculatedBpm ? `${draft.heartRate.calculatedBpm} bpm` : 'Pending'}</Text>
+          </View>
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewLabel}>Axis</Text>
+            <Text style={styles.reviewValue}>{draft.axis?.interpretedAxis || 'Pending'}</Text>
+          </View>
+          <View style={styles.reviewCard}>
+            <Text style={styles.reviewLabel}>QTc</Text>
+            <Text style={styles.reviewValue}>{draft.qtInterval?.calculatedQtcMs ? `${draft.qtInterval.calculatedQtcMs} ms` : 'Pending'}</Text>
+          </View>
+        </View>
+
         {loading && (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color="#2563eb" />
-            <Text style={styles.loadingText}>Generating AI Interpretation...</Text>
+          <View style={styles.loadingPanel}>
+            <ActivityIndicator size="large" color={Palette.primary} />
+            <Text style={styles.loadingText}>Preparing interpretation support...</Text>
           </View>
         )}
-
       </ScrollView>
+      {learning.sheet}
+
       <View style={styles.footer}>
-        <FlowButtons 
-          onNext={handleSubmit} 
-          nextLabel={loading ? 'Submitting...' : 'Generate AI Interpretation'} 
-          isLast={true} 
-          isValid={!loading} 
-        />
+        <Pressable style={[styles.backButton, loading && styles.footerButtonDisabled]} onPress={() => router.back()} disabled={loading}>
+          <Ionicons name="arrow-back" size={18} color={loading ? Palette.muted : Palette.primary} />
+          <Text style={[styles.backButtonText, loading && styles.disabledButtonText]}>Back</Text>
+        </Pressable>
+        <Pressable style={[styles.submitButton, loading && styles.footerButtonDisabled]} onPress={handleSubmit} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator size="small" color={Palette.paper} />
+          ) : (
+            <Ionicons name="flash-outline" size={18} color={Palette.paper} />
+          )}
+          <Text style={styles.submitButtonText}>{loading ? 'Preparing' : 'Prepare report'}</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scrollContent: { padding: 24, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#0f172a', marginBottom: 8 },
-  subtitle: { fontSize: 16, color: '#64748b', marginBottom: 24 },
-  field: { marginBottom: 24 },
-  label: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 8 },
-  textArea: { 
-    borderWidth: 1, 
-    borderColor: '#cbd5e1', 
-    borderRadius: 8, 
-    padding: 16, 
-    fontSize: 16, 
-    backgroundColor: '#f8fafc',
-    minHeight: 120 
+  inputLabel: { color: Palette.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  textArea: {
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    color: Palette.ink,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+    minHeight: 142,
+    padding: 14,
   },
-  loadingBox: {
-    padding: 32,
+  synthesisCard: {
+    alignItems: 'flex-start',
+    backgroundColor: Palette.primary,
+    borderCurve: 'continuous',
+    borderRadius: Radius.xl,
+    boxShadow: Palette.shadow,
+    flexDirection: 'row',
+    gap: 13,
+    padding: 18,
+  },
+  synthesisIcon: {
     alignItems: 'center',
-    marginTop: 20
+    backgroundColor: 'rgba(255, 253, 248, 0.14)',
+    borderColor: 'rgba(255, 253, 248, 0.2)',
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
   },
-  loadingText: {
-    marginTop: 16,
-    color: '#2563eb',
-    fontSize: 16,
-    fontWeight: '500'
+  synthesisCopy: { flex: 1, gap: 5 },
+  synthesisTitle: { color: Palette.paper, fontSize: 17, fontWeight: '900' },
+  synthesisText: { color: '#cfe6e2', fontSize: 13, fontWeight: '700', lineHeight: 19 },
+  reviewGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  reviewCard: {
+    backgroundColor: Palette.paper,
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    boxShadow: Palette.smallShadow,
+    flexGrow: 1,
+    flexBasis: '47%',
+    gap: 5,
+    minHeight: 74,
+    padding: 14,
   },
-  footer: { paddingHorizontal: 24, borderTopWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#fff' }
+  reviewLabel: { color: Palette.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  reviewValue: { color: Palette.primary, fontSize: 15, fontWeight: '900', lineHeight: 20 },
+  loadingPanel: {
+    alignItems: 'center',
+    backgroundColor: Palette.primarySoft,
+    borderColor: '#cce2df',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 12,
+    padding: 22,
+  },
+  loadingText: { color: Palette.primary, fontSize: 14, fontWeight: '900' },
+  footer: {
+    backgroundColor: Palette.canvas,
+    borderColor: Palette.line,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: Layout.pagePadding,
+  },
+  backButton: {
+    alignItems: 'center',
+    backgroundColor: Palette.paper,
+    borderColor: Palette.lineStrong,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 54,
+  },
+  backButtonText: { color: Palette.primary, fontSize: 15, fontWeight: '900' },
+  submitButton: {
+    alignItems: 'center',
+    backgroundColor: Palette.primary,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    flex: 1.35,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 54,
+  },
+  submitButtonText: { color: Palette.paper, fontSize: 15, fontWeight: '900' },
+  footerButtonDisabled: { opacity: 0.68 },
+  disabledButtonText: { color: Palette.muted },
 });
