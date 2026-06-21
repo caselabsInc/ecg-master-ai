@@ -10,7 +10,7 @@
     "ios": {
       "icon": "./assets/icon.png",
       "bundleIdentifier": "com.caselabs.ecgmaster",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "googleServicesFile": "./GoogleService-Info.plist",
       "config": {
         "usesNonExemptEncryption": false
@@ -46,12 +46,7 @@
           }
         }
       ],
-      [
-        "@react-native-google-signin/google-signin",
-        {
-          "iosUrlScheme": "com.googleusercontent.apps.984586118056-nn43bqm9l3sbn0en5ronsfeivpocqb2p"
-        }
-      ],
+      "@react-native-google-signin/google-signin",
       [
         "expo-build-properties",
         {

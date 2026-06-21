@@ -10,11 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { configureGoogleSignIn } from '@/services/googleSignIn';
 
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
-  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
-});
+configureGoogleSignIn();
 
 function authErrorMessage(error: any) {
   const code = error?.code || '';
@@ -112,6 +110,7 @@ export default function SignUp() {
   const handleGoogleAuth = async () => {
     try {
       setLoading(true);
+      configureGoogleSignIn();
       await GoogleSignin.hasPlayServices();
       const userInfo = await GoogleSignin.signIn();
       
