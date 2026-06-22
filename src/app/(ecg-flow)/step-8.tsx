@@ -7,7 +7,7 @@ import { Palette, Radius } from '@/constants/design';
 import { extendedLeads } from '@/constants/ecg';
 import { useEcgStore } from '@/store/ecgStore';
 
-type StStatus = 'normal' | 'elevated' | 'depressed';
+type StStatus = 'normal' | 'elevated' | 'depressed' | 'not_assessable';
 
 const leadsList = extendedLeads;
 const reciprocalMap: Record<string, string[]> = {
@@ -51,6 +51,7 @@ export default function Step8() {
   const { draft, updateDraft } = useEcgStore();
   const learning = useLearningSheet();
   const stSegment = draft.stSegment || {};
+  const stNotAssessableFromDependencies = draft.qrsComplex?.presence === 'absent' || draft.tWaves?.presence === 'absent';
   const primaryLeads = stSegment.leads || [];
   const expectedReciprocalLeads = Array.from(
     new Set(primaryLeads.flatMap((lead) => reciprocalMap[lead] || []))
@@ -62,7 +63,7 @@ export default function Step8() {
       stSegment: {
         ...stSegment,
         status,
-        ...(status === 'normal' && { leads: [], reciprocalLeads: [], hasReciprocalChanges: false, smallBoxes: undefined }),
+        ...((status === 'normal' || status === 'not_assessable') && { leads: [], reciprocalLeads: [], hasReciprocalChanges: false, smallBoxes: undefined }),
       },
     });
   };
@@ -90,10 +91,12 @@ export default function Step8() {
 
   const isAbnormal = stSegment.status === 'elevated' || stSegment.status === 'depressed';
   const isValid =
-    !!stSegment.status &&
+    (stNotAssessableFromDependencies || !!stSegment.status) &&
     (!isAbnormal || (primaryLeads.length > 0 && stSegment.smallBoxes !== undefined && stSegment.smallBoxes !== null));
   const summary =
-    stSegment.status === 'normal'
+    stNotAssessableFromDependencies || stSegment.status === 'not_assessable'
+      ? 'ST segment not assessable'
+      : stSegment.status === 'normal'
       ? 'ST segment normal'
       : stSegment.status === 'elevated'
         ? 'ST elevation recorded'
@@ -120,6 +123,14 @@ export default function Step8() {
         />
 
         <View style={flowStyles.card}>
+          {stNotAssessableFromDependencies && (
+            <View style={styles.dependencyNotice}>
+              <Ionicons name="alert-circle-outline" size={18} color={Palette.accent} />
+              <Text style={styles.dependencyNoticeText}>
+                ST assessment depends on identifiable QRS complexes and T-wave onset. It is marked not assessable because a required waveform was marked absent.
+              </Text>
+            </View>
+          )}
           <SectionHeader
             icon="analytics-outline"
             title="ST status"
@@ -130,10 +141,16 @@ export default function Step8() {
               { label: 'Normal', value: 'normal', icon: 'checkmark-circle-outline' as const, detail: 'Flat and level with baseline.' },
               { label: 'Elevated', value: 'elevated', icon: 'trending-up-outline' as const, detail: 'Above the isoelectric line.' },
               { label: 'Depressed', value: 'depressed', icon: 'trending-down-outline' as const, detail: 'Below the isoelectric line.' },
+              { label: 'Not assessable', value: 'not_assessable', icon: 'remove-circle-outline' as const, detail: 'QRS or T-wave landmarks are absent or unreliable.' },
             ].map((option) => {
-              const selected = stSegment.status === option.value;
+              const selected = (stNotAssessableFromDependencies && option.value === 'not_assessable') || stSegment.status === option.value;
               return (
-                <Pressable key={option.value} style={[styles.optionRow, selected && styles.optionRowActive]} onPress={() => setStatus(option.value as StStatus)}>
+                <Pressable
+                  key={option.value}
+                  style={[styles.optionRow, selected && styles.optionRowActive]}
+                  onPress={() => setStatus(option.value as StStatus)}
+                  disabled={stNotAssessableFromDependencies && option.value !== 'not_assessable'}
+                >
                   <View style={[styles.optionIcon, selected && styles.optionIconActive]}>
                     <Ionicons name={option.icon} size={18} color={selected ? Palette.paper : Palette.primary} />
                   </View>
@@ -403,6 +420,24 @@ const styles = StyleSheet.create({
   toggleButtonActive: { backgroundColor: Palette.primary, borderColor: Palette.primary },
   toggleButtonText: { color: Palette.primary, fontSize: 14, fontWeight: '900' },
   toggleButtonTextActive: { color: Palette.paper },
+  dependencyNotice: {
+    alignItems: 'flex-start',
+    backgroundColor: '#fff4df',
+    borderColor: '#f3d49b',
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    padding: 12,
+  },
+  dependencyNoticeText: {
+    color: '#7a4b00',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 17,
+  },
   tipPanel: {
     alignItems: 'flex-start',
     backgroundColor: Palette.successSoft,

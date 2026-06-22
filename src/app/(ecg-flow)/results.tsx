@@ -589,13 +589,18 @@ export default function Results() {
   const shareReport = async () => {
     if (!report) return;
     const interpretation = readInterpretation(report.aiInterpretation);
-    const qtcShare = report.qtInterval?.measurementStatus === 'unmeasurable'
-      ? 'unmeasurable'
-      : `${report.qtInterval?.calculatedQtcMs ?? '--'} ms`;
+    const qrsShare = report.qrsComplex?.presence === 'absent' ? 'absent' : `${report.qrsComplex?.calculatedMs ?? '--'} ms`;
+    const qtcShare = report.qrsComplex?.presence === 'absent'
+      ? 'unmeasurable: no QRS'
+      : report.tWaves?.presence === 'absent'
+        ? 'unmeasurable: no T wave'
+        : report.qtInterval?.measurementStatus === 'unmeasurable'
+          ? 'unmeasurable'
+          : `${report.qtInterval?.calculatedQtcMs ?? '--'} ms`;
     await Share.share({
       message: `ECG report\n\n${interpretation.summary}\n\nHR: ${report.heartRate?.calculatedBpm ?? '--'} bpm\nPR: ${
         report.prInterval?.calculatedMs ?? '--'
-      } ms\nQRS: ${report.qrsComplex?.calculatedMs ?? '--'} ms\nQTc: ${qtcShare}`,
+      } ms\nQRS: ${qrsShare}\nQTc: ${qtcShare}`,
     });
   };
 
@@ -715,9 +720,16 @@ export default function Results() {
   const missingInputs = decisionSupport.auditTrail?.missingOrUncertainInputs ?? [];
   const heartRate = report.heartRate?.calculatedBpm ?? '--';
   const pr = report.prInterval?.calculatedMs ?? '--';
-  const qrs = report.qrsComplex?.calculatedMs ?? (report.qrsComplex?.durationSmallBoxes ? report.qrsComplex.durationSmallBoxes * 40 : '--');
-  const qtc = report.qtInterval?.measurementStatus === 'unmeasurable' ? 'Unmeasurable' : report.qtInterval?.calculatedQtcMs ?? '--';
-  const qtcUnit = report.qtInterval?.measurementStatus === 'unmeasurable' ? undefined : 'ms';
+  const qrs = report.qrsComplex?.presence === 'absent'
+    ? 'Absent'
+    : report.qrsComplex?.calculatedMs ?? (report.qrsComplex?.durationSmallBoxes ? report.qrsComplex.durationSmallBoxes * 40 : '--');
+  const qrsUnit = report.qrsComplex?.presence === 'absent' ? undefined : 'ms';
+  const qtc = report.qrsComplex?.presence === 'absent'
+    ? 'Unmeasurable: no QRS'
+    : report.tWaves?.presence === 'absent'
+      ? 'Unmeasurable: no T wave'
+      : report.qtInterval?.measurementStatus === 'unmeasurable' ? 'Unmeasurable' : report.qtInterval?.calculatedQtcMs ?? '--';
+  const qtcUnit = typeof qtc === 'number' ? 'ms' : undefined;
   const rhythm = report.rhythm?.rhythmCategory ? report.rhythm.rhythmCategory.replaceAll('_', ' ') : 'Not documented';
   const patientContext = [
     report.context?.age ? `${report.context.age} years` : 'Age not documented',
@@ -859,7 +871,7 @@ export default function Results() {
             <View style={styles.metricsGrid}>
               <MetricTile label="Heart rate" value={heartRate} unit="bpm" tone="primary" />
               <MetricTile label="PR interval" value={pr} unit="ms" />
-              <MetricTile label="QRS duration" value={qrs} unit="ms" />
+              <MetricTile label="QRS duration" value={qrs} unit={qrsUnit} />
               <MetricTile label="QTc" value={qtc} unit={qtcUnit} />
             </View>
             <View style={styles.contextPanel}>

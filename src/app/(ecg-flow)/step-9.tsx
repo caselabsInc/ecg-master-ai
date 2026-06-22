@@ -28,9 +28,44 @@ export default function Step9() {
   const { draft, updateDraft } = useEcgStore();
   const learning = useLearningSheet();
   const tWaves = draft.tWaves || {};
+  const tWaveAbsent = tWaves.presence === 'absent';
+
+  const markTWavePresence = (presence: 'present' | 'absent' | 'unclear') => {
+    if (presence === 'absent') {
+      updateDraft({
+        tWaves: {
+          presence,
+          absentReason: tWaves.absentReason,
+        },
+        qtInterval: {
+          measurementStatus: 'unmeasurable',
+          unmeasurableReason: 'absent_t_waves',
+        },
+        stSegment: draft.stSegment?.status === 'not_assessable'
+          ? draft.stSegment
+          : {
+              ...draft.stSegment,
+              status: 'not_assessable',
+              leads: [],
+              reciprocalLeads: [],
+              hasReciprocalChanges: false,
+              smallBoxes: undefined,
+            },
+      });
+      return;
+    }
+
+    updateDraft({
+      tWaves: {
+        ...tWaves,
+        presence,
+        ...(presence === 'present' && { absentReason: undefined }),
+      },
+    });
+  };
 
   const setStatus = (status: TWaveStatus) => {
-    updateDraft({ tWaves: { ...tWaves, status, ...(status === 'normal' && { leads: [] }) } });
+    updateDraft({ tWaves: { ...tWaves, presence: 'present', absentReason: undefined, status, ...(status === 'normal' && { leads: [] }) } });
   };
 
   const toggleLead = (lead: string) => {
@@ -44,10 +79,12 @@ export default function Step9() {
   };
 
   const involved = tWaves.leads || [];
-  const isAbnormal = tWaves.status && tWaves.status !== 'normal';
-  const isValid = !!tWaves.status && (!isAbnormal || involved.length > 0);
+  const isAbnormal = !tWaveAbsent && tWaves.status && tWaves.status !== 'normal';
+  const isValid = tWaveAbsent || (!!tWaves.status && (!isAbnormal || involved.length > 0));
   const summary =
-    tWaves.status === 'normal'
+    tWaveAbsent
+      ? 'T waves absent / not visible'
+      : tWaves.status === 'normal'
       ? 'Normal concordant T waves'
       : tWaves.status === 'inverted'
         ? 'T wave inversion recorded'
@@ -75,13 +112,65 @@ export default function Step9() {
           summaryLabel="T wave read"
           summary={summary}
           pills={[
-            { label: 'Shape', complete: !!tWaves.status },
+            { label: 'Shape', complete: tWaveAbsent || !!tWaves.status },
+            { label: 'Visible', complete: tWaves.presence === 'present' || tWaveAbsent },
             { label: 'Leads', complete: !isAbnormal || involved.length > 0 },
           ]}
           learnTopicId="step.tWaves"
           onOpenLearning={learning.openTopic}
         />
 
+        <View style={flowStyles.card}>
+          <SectionHeader
+            icon="eye-outline"
+            title="T-wave visibility"
+            detail="Confirm whether T waves are visible before assessing morphology or measuring QT."
+          />
+          <View style={styles.toggleRow}>
+            {[
+              { label: 'Present', value: 'present' as const },
+              { label: 'Absent', value: 'absent' as const },
+              { label: 'Unclear', value: 'unclear' as const },
+            ].map((option) => (
+              <Pressable
+                key={option.value}
+                style={[styles.toggleButton, tWaves.presence === option.value && styles.toggleButtonActive]}
+                onPress={() => markTWavePresence(option.value)}
+              >
+                <Text style={[styles.toggleButtonText, tWaves.presence === option.value && styles.toggleButtonTextActive]}>{option.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {tWaveAbsent && (
+            <>
+              <Text style={styles.groupLabel}>Reason T waves are absent or not visible</Text>
+              <View style={styles.chipGrid}>
+                {[
+                  { label: 'Asystole', value: 'asystole' },
+                  { label: 'VF / no organised cycle', value: 'ventricular_fibrillation' },
+                  { label: 'Very low amplitude', value: 'low_amplitude' },
+                  { label: 'Artifact', value: 'artifact' },
+                  { label: 'Merged with QRS/ST', value: 'merged_with_qrs_or_st' },
+                  { label: 'Unclear', value: 'unclear' },
+                  { label: 'Other', value: 'other' },
+                ].map((reason) => {
+                  const selected = tWaves.absentReason === reason.value;
+                  return (
+                    <Pressable
+                      key={reason.value}
+                      style={[styles.chip, selected && styles.chipActive]}
+                      onPress={() => updateDraft({ tWaves: { ...tWaves, presence: 'absent', absentReason: reason.value as any } })}
+                    >
+                      <Text style={[styles.chipText, selected && styles.chipTextActive]}>{reason.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          )}
+        </View>
+
+        {!tWaveAbsent && (
         <View style={flowStyles.card}>
           <SectionHeader
             icon="pulse-outline"
@@ -116,6 +205,7 @@ export default function Step9() {
             })}
           </View>
         </View>
+        )}
 
         {isAbnormal && (
           <View style={flowStyles.card}>
@@ -254,6 +344,21 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: Palette.primary, borderColor: Palette.primary },
   chipText: { color: Palette.primary, fontSize: 12, fontWeight: '900' },
   chipTextActive: { color: Palette.paper },
+  toggleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  toggleButton: {
+    alignItems: 'center',
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexGrow: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  toggleButtonActive: { backgroundColor: Palette.primary, borderColor: Palette.primary },
+  toggleButtonText: { color: Palette.primary, fontSize: 13, fontWeight: '900' },
+  toggleButtonTextActive: { color: Palette.paper },
   guideCard: {
     alignItems: 'flex-start',
     backgroundColor: Palette.successSoft,

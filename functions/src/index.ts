@@ -1,4 +1,4 @@
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import * as admin from 'firebase-admin';
 import { GoogleGenAI } from '@google/genai';
@@ -78,6 +78,36 @@ async function enforceAiUsageControls(uid: string) {
   });
 }
 
+async function getAuthenticatedUid(request: CallableRequest) {
+  if (request.auth?.uid) {
+    return request.auth.uid;
+  }
+
+  const authorization = request.rawRequest.get('authorization') || '';
+  const match = authorization.match(/^Bearer (.+)$/i);
+  const idToken = match?.[1];
+
+  if (!idToken) {
+    throw new HttpsError(
+      'unauthenticated',
+      'You must be logged in to generate an interpretation.'
+    );
+  }
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken, true);
+    return decodedToken.uid;
+  } catch (error) {
+    console.warn('generateECGInterpretation: invalid Firebase ID token', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new HttpsError(
+      'unauthenticated',
+      'Your session could not be verified. Please sign in again.'
+    );
+  }
+}
+
 export const generateECGInterpretation = onCall(
   {
     enforceAppCheck: true,
@@ -88,13 +118,7 @@ export const generateECGInterpretation = onCall(
   async (request) => {
     const startedAt = Date.now();
 
-    // Ensure the user is authenticated
-    if (!request.auth) {
-      throw new HttpsError(
-        'unauthenticated',
-        'You must be logged in to generate an interpretation.'
-      );
-    }
+    const uid = await getAuthenticatedUid(request);
 
     const reportData = request.data.reportData;
     if (!reportData) {
@@ -163,7 +187,7 @@ Respond ONLY with a valid JSON object matching this schema exactly:
       );
     }
 
-    await enforceAiUsageControls(request.auth.uid);
+    await enforceAiUsageControls(uid);
 
     // Initialize the Gemini SDK inside the function execution to securely access the secret value
     const ai = new GoogleGenAI({ apiKey: geminiApiKey.value() });
@@ -172,7 +196,7 @@ Respond ONLY with a valid JSON object matching this schema exactly:
       console.info('generateECGInterpretation: starting Gemini request', {
         inputBytes: promptBytes,
         reportDataBytes,
-        uid: request.auth.uid,
+        uid,
       });
       const geminiStartedAt = Date.now();
       const response = await ai.models.generateContent({

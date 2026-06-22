@@ -108,6 +108,7 @@ function deriveRhythm({
   rrRegularity,
   pPresence,
   pMorphology,
+  abnormalAtrialActivity,
   absentPExplanation,
   prRegularity,
   droppedBeats,
@@ -120,6 +121,7 @@ function deriveRhythm({
   rrRegularity?: string;
   pPresence?: string;
   pMorphology?: string;
+  abnormalAtrialActivity?: string;
   absentPExplanation?: string;
   prRegularity?: string;
   droppedBeats?: boolean;
@@ -140,14 +142,14 @@ function deriveRhythm({
   if (pPresence === 'absent') {
     reasoning.push('Step 2 records absent discrete P waves.');
 
-    if (absentPExplanation === 'atrial_fibrillation' || rrRegularity === 'irregular') {
-      reasoning.push('R-R rhythm is irregular or atrial fibrillation was selected as the absent-P explanation.');
-      return { category: 'atrial_fibrillation', confidence: absentPExplanation === 'atrial_fibrillation' ? 'probable' : 'possible', reasoning };
+    if (abnormalAtrialActivity === 'fibrillatory_waves' || absentPExplanation === 'atrial_fibrillation' || rrRegularity === 'irregular') {
+      reasoning.push('R-R rhythm is irregular or fibrillatory waves were selected as the abnormal atrial activity.');
+      return { category: 'atrial_fibrillation', confidence: abnormalAtrialActivity === 'fibrillatory_waves' || absentPExplanation === 'atrial_fibrillation' ? 'probable' : 'possible', reasoning };
     }
 
-    if (absentPExplanation === 'atrial_flutter' || (atrialRate !== null && atrialRate !== undefined && atrialRate >= 240 && atrialRate <= 360)) {
-      reasoning.push('Flutter-wave explanation or atrial rate falls in the usual flutter range.');
-      return { category: 'atrial_flutter', confidence: absentPExplanation === 'atrial_flutter' ? 'probable' : 'possible', reasoning };
+    if (abnormalAtrialActivity === 'flutter_waves' || absentPExplanation === 'atrial_flutter' || (atrialRate !== null && atrialRate !== undefined && atrialRate >= 240 && atrialRate <= 360)) {
+      reasoning.push('Flutter waves were selected or atrial rate falls in the usual flutter range.');
+      return { category: 'atrial_flutter', confidence: abnormalAtrialActivity === 'flutter_waves' || absentPExplanation === 'atrial_flutter' ? 'probable' : 'possible', reasoning };
     }
 
     if (absentPExplanation === 'junctional_rhythm') {
@@ -239,6 +241,7 @@ export default function Step4() {
     rrRegularity: heartRate.regularity,
     pPresence: pWave.presence,
     pMorphology: pWave.morphology,
+    abnormalAtrialActivity: pWave.abnormalAtrialActivity,
     absentPExplanation: pWave.absentPExplanation,
     prRegularity: prInterval.regularity,
     droppedBeats: prInterval.droppedBeats,

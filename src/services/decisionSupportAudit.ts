@@ -107,6 +107,7 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
       inputs: [
         `R-R regularity: ${formatValue(report.heartRate?.regularity)}`,
         `P waves: ${formatValue(report.pWave?.presence)}`,
+        `Abnormal atrial activity: ${formatValue(report.pWave?.abnormalAtrialActivity ?? report.pWave?.absentPExplanation)}`,
         `P/QRS relationship: ${formatValue(report.rhythm?.pQrsRelationship)}`,
         `PR regularity: ${formatValue(report.prInterval?.regularity)}`,
       ],
@@ -131,7 +132,18 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
     missingOrUncertainInputs.push('PR interval and AV conduction');
   }
 
-  if (report.qrsComplex?.calculatedMs || report.qrsComplex?.derivedSummary?.length || report.qrsComplex?.findings?.length) {
+  if (report.qrsComplex?.presence === 'absent') {
+    addFinding(ruleFindings, {
+      id: 'qrs-complex-absent',
+      label: 'QRS complex',
+      finding: `QRS complexes absent or not organised; reason: ${formatValue(report.qrsComplex?.absentReason)}`,
+      basis: 'Clinician marked QRS complexes as absent, so QRS duration, BBB morphology, ventricular axis, ST segment, and QT interval are not reliably assessable.',
+      inputs: [
+        `QRS presence: ${formatValue(report.qrsComplex?.presence)}`,
+        `Absent reason: ${formatValue(report.qrsComplex?.absentReason)}`,
+      ],
+    });
+  } else if (report.qrsComplex?.calculatedMs || report.qrsComplex?.derivedSummary?.length || report.qrsComplex?.findings?.length) {
     addFinding(ruleFindings, {
       id: 'qrs-complex',
       label: 'QRS complex',
@@ -178,6 +190,31 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
     });
   }
 
+  if (report.tWaves?.presence === 'absent') {
+    addFinding(ruleFindings, {
+      id: 't-waves-absent',
+      label: 'T waves',
+      finding: `T waves absent or not visible; reason: ${formatValue(report.tWaves?.absentReason)}`,
+      basis: 'Clinician marked T waves as absent, so T-wave morphology and QT endpoint assessment are limited.',
+      inputs: [
+        `T-wave presence: ${formatValue(report.tWaves?.presence)}`,
+        `Absent reason: ${formatValue(report.tWaves?.absentReason)}`,
+      ],
+    });
+  } else if (report.tWaves?.status || report.tWaves?.syndromePattern) {
+    addFinding(ruleFindings, {
+      id: 't-waves',
+      label: 'T waves',
+      finding: `${formatValue(report.tWaves?.status)}; syndrome pattern: ${formatValue(report.tWaves?.syndromePattern)}`,
+      basis: 'T-wave assessment is based on clinician-entered morphology, distribution, and named pattern selection.',
+      inputs: [
+        `T-wave presence: ${formatValue(report.tWaves?.presence)}`,
+        `Leads: ${formatValue(report.tWaves?.leads)}`,
+        `Morphology: ${formatValue(report.tWaves?.morphology)}`,
+      ],
+    });
+  }
+
   if (report.qtInterval?.measurementStatus === 'unmeasurable') {
     addFinding(ruleFindings, {
       id: 'qt-interval-unmeasurable',
@@ -218,6 +255,7 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
         qrsComplex: report.qrsComplex ?? {},
         axis: report.axis ?? {},
         stSegment: report.stSegment ?? {},
+        tWaves: report.tWaves ?? {},
         qtInterval: report.qtInterval ?? {},
       },
       missingOrUncertainInputs,

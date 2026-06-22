@@ -12,9 +12,17 @@ export default function Step10() {
   const qtInterval = draft.qtInterval || {};
   const heartRate = draft.heartRate?.calculatedBpm;
   const rrIntervalMs = heartRate ? Math.round(60000 / heartRate) : undefined;
-  const measurementStatus = qtInterval.measurementStatus ?? (qtInterval.smallBoxes !== undefined ? 'measured' : undefined);
+  const forcedUnmeasurableReason =
+    draft.qrsComplex?.presence === 'absent'
+      ? 'absent_qrs_complexes'
+      : draft.tWaves?.presence === 'absent'
+        ? 'absent_t_waves'
+        : undefined;
+  const measurementStatus = forcedUnmeasurableReason ? 'unmeasurable' : qtInterval.measurementStatus ?? (qtInterval.smallBoxes !== undefined ? 'measured' : undefined);
   const isUnmeasurable = measurementStatus === 'unmeasurable';
   const unmeasurableReasons = [
+    { label: 'Absent QRS complexes', value: 'absent_qrs_complexes', detail: 'No reliable QRS onset is available.' },
+    { label: 'Absent T waves', value: 'absent_t_waves', detail: 'No reliable T-wave end is available.' },
     { label: 'Irregular rhythm', value: 'irregular_rhythm', detail: 'Beat-to-beat QT varies too much.' },
     { label: 'Unclear T end', value: 'unclear_t_end', detail: 'T-wave return to baseline is not reliable.' },
     { label: 'Prominent U waves', value: 'prominent_u_waves', detail: 'T and U waves cannot be separated confidently.' },
@@ -24,6 +32,17 @@ export default function Step10() {
     { label: 'No organised complexes', value: 'no_organized_complexes', detail: 'No consistent QRS-T complex can be measured.' },
     { label: 'Other', value: 'other', detail: 'Document the limitation in final notes.' },
   ] as const;
+
+  React.useEffect(() => {
+    if (forcedUnmeasurableReason && qtInterval.unmeasurableReason !== forcedUnmeasurableReason) {
+      updateDraft({
+        qtInterval: {
+          measurementStatus: 'unmeasurable',
+          unmeasurableReason: forcedUnmeasurableReason,
+        },
+      });
+    }
+  }, [forcedUnmeasurableReason, qtInterval.unmeasurableReason, updateDraft]);
 
   const handleChange = (text: string) => {
     const boxes = parseFloat(text);
@@ -69,6 +88,8 @@ export default function Step10() {
   };
 
   const markMeasured = () => {
+    if (forcedUnmeasurableReason) return;
+
     updateDraft({
       qtInterval: {
         ...qtInterval,
@@ -87,7 +108,8 @@ export default function Step10() {
     });
   };
 
-  const isValid = isUnmeasurable ? !!qtInterval.unmeasurableReason : qtInterval.smallBoxes !== undefined;
+  const activeUnmeasurableReason = forcedUnmeasurableReason || qtInterval.unmeasurableReason;
+  const isValid = isUnmeasurable ? !!activeUnmeasurableReason : qtInterval.smallBoxes !== undefined;
   const summary = isUnmeasurable
     ? 'QT unmeasurable'
     : qtInterval.calculatedQtcMs !== undefined
@@ -116,12 +138,13 @@ export default function Step10() {
           <SectionHeader
             icon="options-outline"
             title="Measurement status"
-            detail="Measure QT when landmarks are clear, or mark it unmeasurable when the T-wave end cannot be trusted."
+            detail={forcedUnmeasurableReason ? 'QT is automatically unmeasurable because a required waveform was marked absent.' : 'Measure QT when landmarks are clear, or mark it unmeasurable when the T-wave end cannot be trusted.'}
           />
           <View style={styles.statusRow}>
             <Pressable
               style={[styles.statusButton, !isUnmeasurable && styles.statusButtonActive]}
               onPress={markMeasured}
+              disabled={!!forcedUnmeasurableReason}
             >
               <Ionicons name="resize-outline" size={18} color={!isUnmeasurable ? Palette.paper : Palette.primary} />
               <Text style={[styles.statusButtonText, !isUnmeasurable && styles.statusButtonTextActive]}>Measure QT</Text>
@@ -145,12 +168,13 @@ export default function Step10() {
             />
             <View style={styles.reasonGrid}>
               {unmeasurableReasons.map((reason) => {
-                const selected = qtInterval.unmeasurableReason === reason.value;
+                const selected = activeUnmeasurableReason === reason.value;
                 return (
                   <Pressable
                     key={reason.value}
                     style={[styles.reasonCard, selected && styles.reasonCardActive]}
                     onPress={() => markUnmeasurable(reason.value)}
+                    disabled={!!forcedUnmeasurableReason && forcedUnmeasurableReason !== reason.value}
                   >
                     <Text style={[styles.reasonTitle, selected && styles.reasonTitleActive]}>{reason.label}</Text>
                     <Text style={[styles.reasonDetail, selected && styles.reasonDetailActive]}>{reason.detail}</Text>

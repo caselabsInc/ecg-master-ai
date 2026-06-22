@@ -15,6 +15,8 @@ type MorphologyOption = {
   icon: keyof typeof Ionicons.glyphMap;
 };
 
+type AbnormalAtrialActivity = 'fibrillatory_waves' | 'flutter_waves' | 'artifact' | 'unclear' | 'other';
+
 type TraceSegment = {
   x1: number;
   y1: number;
@@ -103,6 +105,13 @@ function SummaryPill({ label, complete }: { label: string; complete: boolean }) 
       <Text style={[styles.summaryPillText, complete && styles.summaryPillTextComplete]}>{label}</Text>
     </View>
   );
+}
+
+function legacyAbsentPToAtrialActivity(value?: string | null): AbnormalAtrialActivity | undefined {
+  if (value === 'atrial_fibrillation') return 'fibrillatory_waves';
+  if (value === 'atrial_flutter') return 'flutter_waves';
+  if (value === 'artifact' || value === 'unclear' || value === 'other') return value;
+  return undefined;
 }
 
 function MeasurementInput({
@@ -264,7 +273,7 @@ export default function Step2() {
   const durationComplete = !pPresent || !!pWave.leadIIDurationSmallBoxes;
   const amplitudeComplete = !pPresent || !!pWave.leadIIAmplitudeSmallBoxes;
   const morphologyComplete = !pPresent || !!pWave.morphology;
-  const absentExplanationComplete = pWave.presence !== 'absent' || !!pWave.absentPExplanation;
+  const absentExplanationComplete = pWave.presence !== 'absent' || !!pWave.abnormalAtrialActivity || !!pWave.absentPExplanation;
   const isValid = pPresenceComplete && morphologyComplete && durationComplete && amplitudeComplete && absentExplanationComplete;
   const pWaveLabel =
     pWave.presence === 'absent'
@@ -289,6 +298,10 @@ export default function Step2() {
           v1TerminalNegativeDurationSmallBoxes: undefined,
           v1TerminalNegativeDepthSmallBoxes: undefined,
           abnormalFeatures: undefined,
+        }),
+        ...(presence === 'present' && {
+          abnormalAtrialActivity: undefined,
+          absentPExplanation: undefined,
         }),
       },
       ...(presence === 'absent' && {
@@ -391,10 +404,8 @@ export default function Step2() {
   ] as const;
 
   const absentPOptions = [
-    { label: 'AF', value: 'atrial_fibrillation' },
-    { label: 'Flutter', value: 'atrial_flutter' },
-    { label: 'Junctional', value: 'junctional_rhythm' },
-    { label: 'Ventricular', value: 'ventricular_rhythm' },
+    { label: 'Fibrillatory waves', value: 'fibrillatory_waves' },
+    { label: 'Flutter waves', value: 'flutter_waves' },
     { label: 'Artifact', value: 'artifact' },
     { label: 'Unclear', value: 'unclear' },
     { label: 'Other', value: 'other' },
@@ -490,17 +501,17 @@ export default function Step2() {
           <View style={styles.card}>
             <SectionHeader
               icon="help-circle-outline"
-              title="Absent P-wave explanation"
-              detail="Choose the most likely atrial activity pattern before the rhythm synthesis step."
+              title="Abnormal atrial activity"
+              detail="When discrete P waves are absent, document what replaces them before rhythm synthesis."
             />
             <View style={styles.chipGrid}>
               {absentPOptions.map((option) => {
-                const selected = pWave.absentPExplanation === option.value;
+                const selected = pWave.abnormalAtrialActivity === option.value || legacyAbsentPToAtrialActivity(pWave.absentPExplanation) === option.value;
                 return (
                   <Pressable
                     key={option.value}
                     style={[styles.chip, selected && styles.chipActive]}
-                    onPress={() => updateDraft({ pWave: { ...pWave, absentPExplanation: option.value } })}
+                    onPress={() => updateDraft({ pWave: { ...pWave, abnormalAtrialActivity: option.value, absentPExplanation: undefined } })}
                   >
                     <Text style={[styles.chipText, selected && styles.chipTextActive]}>{option.label}</Text>
                   </Pressable>

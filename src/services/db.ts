@@ -64,6 +64,7 @@ export interface EcgReport {
     leadIIAmplitudeSmallBoxes?: number | null;
     v1TerminalNegativeDurationSmallBoxes?: number | null;
     v1TerminalNegativeDepthSmallBoxes?: number | null;
+    abnormalAtrialActivity?: 'fibrillatory_waves' | 'flutter_waves' | 'artifact' | 'unclear' | 'other';
     absentPExplanation?: 'atrial_fibrillation' | 'atrial_flutter' | 'junctional_rhythm' | 'ventricular_rhythm' | 'artifact' | 'unclear' | 'other';
     abnormalFeatures?: Array<'left_atrial_enlargement' | 'right_atrial_enlargement' | 'biatrial_enlargement' | 'low_amplitude' | 'wandering_atrial_pacemaker'>;
     notes?: string | null;
@@ -80,6 +81,8 @@ export interface EcgReport {
     avBlockConcern?: 'none' | 'first_degree' | 'mobitz_i' | 'mobitz_ii' | 'high_grade' | 'complete' | 'unclear';
   };
   qrsComplex: {
+    presence?: 'present' | 'absent' | 'unclear';
+    absentReason?: 'asystole' | 'ventricular_fibrillation' | 'artifact' | 'lead_disconnection' | 'unclear' | 'other';
     durationSmallBoxes?: number;
     calculatedMs?: number;
     morphology?: 'normal' | 'hypertrophy' | 'bbb' | 'paced' | 'ventricular' | 'low_voltage' | 'alternans' | 'toxicologic' | 'other';
@@ -159,7 +162,7 @@ export interface EcgReport {
     pseudoInfarctConcern?: Array<'lvh' | 'lbbb' | 'wpw' | 'lead_misplacement' | 'hypertrophic_cardiomyopathy'>;
   };
   stSegment: {
-    status?: 'normal' | 'elevated' | 'depressed';
+    status?: 'normal' | 'elevated' | 'depressed' | 'not_assessable';
     smallBoxes?: number | null;
     leads?: string[] | null;
     hasReciprocalChanges?: boolean;
@@ -174,6 +177,8 @@ export interface EcgReport {
     mimicConsiderations?: Array<'pericarditis' | 'early_repolarization' | 'lvh_strain' | 'lbbb' | 'paced_rhythm' | 'brugada' | 'hyperkalemia' | 'ventricular_aneurysm'>;
   };
   tWaves: {
+    presence?: 'present' | 'absent' | 'unclear';
+    absentReason?: 'asystole' | 'ventricular_fibrillation' | 'low_amplitude' | 'artifact' | 'merged_with_qrs_or_st' | 'unclear' | 'other';
     status?: 'normal' | 'inverted' | 'tall_peaked' | 'hyperacute' | 'biphasic' | 'flattened' | 'deep_symmetric';
     leads?: string[] | null;
     morphology?: 'asymmetric' | 'symmetric' | 'broad_based' | 'narrow_tented' | 'biphasic_a' | 'biphasic_b' | 'camel_hump' | 'unclear';
@@ -181,7 +186,7 @@ export interface EcgReport {
   };
   qtInterval: {
     measurementStatus?: 'measured' | 'unmeasurable';
-    unmeasurableReason?: 'irregular_rhythm' | 'unclear_t_end' | 'prominent_u_waves' | 'wide_qrs_or_paced' | 'tachycardia_overlap' | 'artifact' | 'no_organized_complexes' | 'other';
+    unmeasurableReason?: 'irregular_rhythm' | 'unclear_t_end' | 'prominent_u_waves' | 'wide_qrs_or_paced' | 'tachycardia_overlap' | 'artifact' | 'no_organized_complexes' | 'absent_qrs_complexes' | 'absent_t_waves' | 'other';
     smallBoxes?: number;
     calculatedQtMs?: number;
     calculatedQtcMs?: number;

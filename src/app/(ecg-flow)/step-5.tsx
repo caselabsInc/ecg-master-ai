@@ -422,6 +422,14 @@ function formatFinding(value: string) {
 }
 
 function deriveQrsFindings(qrsComplex: ReturnType<typeof useEcgStore.getState>['draft']['qrsComplex']) {
+  if (qrsComplex?.presence === 'absent') {
+    return {
+      findings: [],
+      summary: ['QRS complexes absent or no organised ventricular complexes documented'],
+      cautions: ['QRS duration, BBB morphology, ventricular axis, ST segment, and QT interval cannot be assessed reliably without identifiable QRS complexes.'],
+    };
+  }
+
   const findings = new Set<QrsFinding>(qrsComplex?.findings || []);
   const summary: string[] = [];
   const cautions: string[] = [];
@@ -543,8 +551,45 @@ export default function Step5() {
     updateDraft({
       qrsComplex: {
         ...qrsComplex,
+        presence: 'present',
+        absentReason: undefined,
         durationSmallBoxes: nextValue,
         calculatedMs: nextValue !== undefined ? Math.round(nextValue * 40) : undefined,
+      },
+    });
+  };
+
+  const markQrsPresence = (presence: 'present' | 'absent' | 'unclear') => {
+    if (presence === 'absent') {
+      setBoxesText('');
+      updateDraft({
+        qrsComplex: {
+          presence,
+          absentReason: qrsComplex.absentReason,
+          derivedSummary: ['QRS complexes absent or no organised ventricular complexes documented'],
+          cautions: ['QRS-dependent measurements and morphology are not assessable.'],
+        },
+        stSegment: {
+          ...draft.stSegment,
+          status: 'not_assessable',
+          leads: [],
+          reciprocalLeads: [],
+          hasReciprocalChanges: false,
+          smallBoxes: undefined,
+        },
+        qtInterval: {
+          measurementStatus: 'unmeasurable',
+          unmeasurableReason: 'absent_qrs_complexes',
+        },
+      });
+      return;
+    }
+
+    updateDraft({
+      qrsComplex: {
+        ...qrsComplex,
+        presence,
+        ...(presence === 'present' && { absentReason: undefined }),
       },
     });
   };
@@ -561,7 +606,7 @@ export default function Step5() {
           ? currentFindings.filter((item) => item !== finding)
           : [...currentFindings.filter((item) => item !== 'normal_conduction'), finding];
 
-    updateDraft({ qrsComplex: { ...qrsComplex, findings: nextFindings } });
+    updateDraft({ qrsComplex: { ...qrsComplex, presence: 'present', absentReason: undefined, findings: nextFindings } });
   };
 
   const updateHypertrophy = (field: HypertrophyField, value: string) => {
@@ -721,12 +766,15 @@ export default function Step5() {
     });
   };
 
-  const durationComplete = qrsComplex.durationSmallBoxes !== undefined && qrsComplex.durationSmallBoxes > 0;
-  const findingsComplete = !!qrsComplex.findings?.length || !!qrsComplex.bbb?.pattern || !!qrsComplex.deltaWave || !!qrsComplex.voltage?.lowLimb || !!qrsComplex.voltage?.lowPrecordial || !!qrsComplex.voltage?.electricalAlternans;
+  const qrsAbsent = qrsComplex.presence === 'absent';
+  const durationComplete = qrsAbsent || (qrsComplex.durationSmallBoxes !== undefined && qrsComplex.durationSmallBoxes > 0);
+  const findingsComplete = qrsAbsent || !!qrsComplex.findings?.length || !!qrsComplex.bbb?.pattern || !!qrsComplex.deltaWave || !!qrsComplex.voltage?.lowLimb || !!qrsComplex.voltage?.lowPrecordial || !!qrsComplex.voltage?.electricalAlternans;
   const derivedQrs = deriveQrsFindings(qrsComplex);
   const isValid = durationComplete && findingsComplete;
   const qrsLabel =
-    qrsComplex.calculatedMs !== undefined
+    qrsAbsent
+      ? 'QRS absent / not assessable'
+      : qrsComplex.calculatedMs !== undefined
       ? `${qrsComplex.calculatedMs} ms QRS`
       : findingsComplete
         ? 'Findings selected'
@@ -914,6 +962,58 @@ export default function Step5() {
 
         <View style={styles.card}>
           <SectionHeader
+            icon="pulse-outline"
+            title="QRS visibility"
+            detail="First confirm whether organised QRS complexes can be identified."
+          />
+          <View style={styles.toggleRow}>
+            {[
+              { label: 'Present', value: 'present' as const },
+              { label: 'Absent', value: 'absent' as const },
+              { label: 'Unclear', value: 'unclear' as const },
+            ].map((option) => (
+              <Pressable
+                key={option.value}
+                style={[styles.toggleButton, qrsComplex.presence === option.value && styles.toggleButtonActive]}
+                onPress={() => markQrsPresence(option.value)}
+              >
+                <Text style={[styles.toggleButtonText, qrsComplex.presence === option.value && styles.toggleButtonTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {qrsAbsent && (
+            <>
+              <Text style={styles.groupLabel}>Reason QRS is absent or not organised</Text>
+              <View style={styles.chipGrid}>
+                {[
+                  { label: 'Asystole', value: 'asystole' },
+                  { label: 'VF / chaotic baseline', value: 'ventricular_fibrillation' },
+                  { label: 'Artifact', value: 'artifact' },
+                  { label: 'Lead issue', value: 'lead_disconnection' },
+                  { label: 'Unclear', value: 'unclear' },
+                  { label: 'Other', value: 'other' },
+                ].map((reason) => {
+                  const selected = qrsComplex.absentReason === reason.value;
+                  return (
+                    <Pressable
+                      key={reason.value}
+                      style={[styles.chip, selected && styles.chipActive]}
+                      onPress={() => updateDraft({ qrsComplex: { ...qrsComplex, presence: 'absent', absentReason: reason.value as any } })}
+                    >
+                      <Text style={[styles.chipText, selected && styles.chipTextActive]}>{reason.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          )}
+        </View>
+
+        {!qrsAbsent && (
+        <View style={styles.card}>
+          <SectionHeader
             icon="resize-outline"
             title="QRS duration"
             detail="Count small boxes from the first deflection to the J point."
@@ -936,7 +1036,9 @@ export default function Step5() {
             </Text>
           </View>
         </View>
+        )}
 
+        {!qrsAbsent && (
         <View style={styles.card}>
           <SectionHeader
             icon="analytics-outline"
@@ -1139,6 +1241,7 @@ export default function Step5() {
             </View>
           )}
         </View>
+        )}
 
         <View style={styles.derivedPanel}>
           <SectionHeader
@@ -1166,6 +1269,7 @@ export default function Step5() {
           )}
         </View>
 
+        {!qrsAbsent && (
         <View style={styles.card}>
           <SectionHeader
             icon="git-compare-outline"
@@ -1212,7 +1316,9 @@ export default function Step5() {
             </View>
           )}
         </View>
+        )}
 
+        {!qrsAbsent && (
         <View style={styles.card}>
           <SectionHeader
             icon="remove-circle-outline"
@@ -1315,7 +1421,9 @@ export default function Step5() {
             </>
           )}
         </View>
+        )}
 
+        {!qrsAbsent && (
         <Pressable style={[styles.deltaCard, qrsComplex.deltaWave && styles.deltaCardActive]} onPress={toggleDeltaWave}>
           <View style={[styles.deltaIcon, qrsComplex.deltaWave && styles.deltaIconActive]}>
             <Ionicons name="warning-outline" size={20} color={qrsComplex.deltaWave ? Palette.paper : Palette.accent} />
@@ -1334,6 +1442,7 @@ export default function Step5() {
             color={qrsComplex.deltaWave ? Palette.accent : Palette.lineStrong}
           />
         </Pressable>
+        )}
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>Interpretive context</Text>

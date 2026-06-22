@@ -138,7 +138,11 @@ export default function Step12() {
           <View style={styles.reviewCard}>
             <Text style={styles.reviewLabel}>QTc</Text>
             <Text style={styles.reviewValue}>
-              {draft.qtInterval?.measurementStatus === 'unmeasurable'
+              {draft.qrsComplex?.presence === 'absent'
+                ? 'Unmeasurable: no QRS'
+                : draft.tWaves?.presence === 'absent'
+                  ? 'Unmeasurable: no T wave'
+                  : draft.qtInterval?.measurementStatus === 'unmeasurable'
                 ? 'Unmeasurable'
                 : draft.qtInterval?.calculatedQtcMs
                   ? `${draft.qtInterval.calculatedQtcMs} ms`
