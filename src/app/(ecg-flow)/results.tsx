@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/services/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { EcgReport } from '@/services/db';
+import { completeReport, EcgReport, markReportAiFailed } from '@/services/db';
 import { normalizeAiInterpretation } from '@/services/aiInterpretation';
 import { buildDecisionSupportAudit } from '@/services/decisionSupportAudit';
 import { Layout, Palette, Radius } from '@/constants/design';
+import { callAppCheckedFunction } from '@/services/protectedCallable';
 
 type ReportTab = 'ai' | 'findings' | 'audit';
 type DangerousFindingsState = 'none' | 'warning' | 'unknown';
@@ -226,7 +227,31 @@ type RichBlock =
   | { type: 'numbered'; number: string; title?: string; text: string };
 
 function cleanMarkdown(text: string) {
-  return text.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+  return text.replace(/\*\*/g, '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function splitInlineBulletSections(block: string) {
+  const bulletParts = block
+    .replace(/\s+-\s+(?=[A-Z0-9][^:]{1,90}:)/g, '\n- ')
+    .split(/\n-\s+|^-\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (bulletParts.length <= 1 && !block.trim().startsWith('-')) return null;
+
+  return bulletParts.map<RichBlock>((part) => {
+    const headingMatch = part.match(/^([^:]{2,100}):\s*([\s\S]*)$/);
+
+    if (headingMatch) {
+      return {
+        type: 'heading',
+        title: cleanMarkdown(headingMatch[1]),
+        text: cleanMarkdown(headingMatch[2]),
+      };
+    }
+
+    return { type: 'paragraph', text: cleanMarkdown(part) };
+  });
 }
 
 function displayUrgencyLabel(urgencyLevel: string, hasAiDraft: boolean) {
@@ -280,6 +305,9 @@ function parseRichText(text: string): RichBlock[] {
     .filter(Boolean);
 
   return rawBlocks.flatMap<RichBlock>((block) => {
+    const bulletSections = splitInlineBulletSections(block);
+    if (bulletSections) return bulletSections;
+
     const numberedMatches = Array.from(
       block.matchAll(/(?:^|\n|\s)(\d+)\.\s+\*\*([^:*]+):\*\*\s*([\s\S]*?)(?=(?:\n|\s)\d+\.\s+\*\*[^:*]+:\*\*|$)/g)
     );
@@ -324,7 +352,7 @@ function RichBlocks({
       {blocks.map((block, index) => {
         if (block.type === 'heading') {
           return (
-            <View key={`${block.title}-${index}`} style={styles.richBlock}>
+            <View key={`${block.title}-${index}`} style={[styles.richBlock, styles.richBlockSection]}>
               <Text style={styles.richHeading} selectable>
                 {block.title}
               </Text>
@@ -467,7 +495,14 @@ function SegmentedTabs({ activeTab, onChange }: { activeTab: ReportTab; onChange
         return (
           <Pressable key={tab.key} style={[styles.segmentedTab, active && styles.segmentedTabActive]} onPress={() => onChange(tab.key)}>
             <Ionicons name={tab.icon} size={15} color={active ? Palette.paper : Palette.primary} />
-            <Text style={[styles.segmentedTabText, active && styles.segmentedTabTextActive]}>{tab.label}</Text>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+              style={[styles.segmentedTabText, active && styles.segmentedTabTextActive]}
+            >
+              {tab.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -512,6 +547,7 @@ export default function Results() {
   const router = useRouter();
   const [report, setReport] = useState<EcgReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<ReportTab>('ai');
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     dangerous: true,
@@ -538,7 +574,7 @@ export default function Results() {
         const docRef = doc(db, 'users', user.uid, 'reports', id as string);
         const snap = await getDoc(docRef);
         if (snap.exists()) {
-          setReport(snap.data() as EcgReport);
+          setReport({ id: snap.id, ...snap.data() } as EcgReport);
         }
       } catch (error) {
         console.error('Error fetching report:', error);
@@ -553,11 +589,84 @@ export default function Results() {
   const shareReport = async () => {
     if (!report) return;
     const interpretation = readInterpretation(report.aiInterpretation);
+    const qtcShare = report.qtInterval?.measurementStatus === 'unmeasurable'
+      ? 'unmeasurable'
+      : `${report.qtInterval?.calculatedQtcMs ?? '--'} ms`;
     await Share.share({
       message: `ECG report\n\n${interpretation.summary}\n\nHR: ${report.heartRate?.calculatedBpm ?? '--'} bpm\nPR: ${
         report.prInterval?.calculatedMs ?? '--'
-      } ms\nQRS: ${report.qrsComplex?.calculatedMs ?? '--'} ms\nQTc: ${report.qtInterval?.calculatedQtcMs ?? '--'} ms`,
+      } ms\nQRS: ${report.qrsComplex?.calculatedMs ?? '--'} ms\nQTc: ${qtcShare}`,
     });
+  };
+
+  const regenerateInterpretation = async () => {
+    if (!user || !id || !report || regenerating) return;
+
+    setRegenerating(true);
+    try {
+      const refreshedDecisionSupport = buildDecisionSupportAudit(report);
+      const reportData = {
+        ...report,
+        aiInterpretation: undefined,
+        decisionSupport: {
+          ...refreshedDecisionSupport,
+          aiStatus: 'not_requested' as const,
+          aiError: undefined,
+        },
+      };
+      const response = await callAppCheckedFunction('generateECGInterpretation', { reportData });
+      const aiData = normalizeAiInterpretation(response);
+
+      if (!aiData) {
+        throw new Error('Interpretation support could not be generated from the saved ECG review.');
+      }
+
+      await completeReport(user.uid, id as string, aiData);
+      setReport((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          status: 'completed',
+          aiInterpretation: aiData,
+          decisionSupport: {
+            ...current.decisionSupport,
+            ...refreshedDecisionSupport,
+            aiStatus: 'generated',
+            aiError: undefined,
+          },
+        };
+      });
+      setActiveTab('ai');
+    } catch (error: any) {
+      console.warn('Interpretation regeneration failed.', error);
+      await markReportAiFailed(user.uid, id as string, {
+        code: error?.code,
+        message: 'Interpretation support could not be generated for this report.',
+      }).catch((updateError) => {
+        console.warn('Could not record regeneration failure.', updateError);
+      });
+      setReport((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          status: 'draft',
+          decisionSupport: {
+            ...current.decisionSupport,
+            aiStatus: 'failed',
+            aiError: {
+              code: error?.code,
+              message: 'Interpretation support could not be generated for this report.',
+              occurredAt: new Date().toISOString(),
+            },
+          },
+        };
+      });
+      Alert.alert('Interpretation still unavailable', 'The saved ECG review is still available. Please check your connection and try again.');
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   if (loading) {
@@ -607,7 +716,8 @@ export default function Results() {
   const heartRate = report.heartRate?.calculatedBpm ?? '--';
   const pr = report.prInterval?.calculatedMs ?? '--';
   const qrs = report.qrsComplex?.calculatedMs ?? (report.qrsComplex?.durationSmallBoxes ? report.qrsComplex.durationSmallBoxes * 40 : '--');
-  const qtc = report.qtInterval?.calculatedQtcMs ?? '--';
+  const qtc = report.qtInterval?.measurementStatus === 'unmeasurable' ? 'Unmeasurable' : report.qtInterval?.calculatedQtcMs ?? '--';
+  const qtcUnit = report.qtInterval?.measurementStatus === 'unmeasurable' ? undefined : 'ms';
   const rhythm = report.rhythm?.rhythmCategory ? report.rhythm.rhythmCategory.replaceAll('_', ' ') : 'Not documented';
   const patientContext = [
     report.context?.age ? `${report.context.age} years` : 'Age not documented',
@@ -732,6 +842,14 @@ export default function Results() {
                   ? decisionSupport.aiError?.message || 'Interpretation support could not be generated. The entered ECG review was saved.'
                   : 'This report is saved, but interpretation support has not been generated yet.'}
               </Text>
+              <Pressable style={[styles.regenerateButton, regenerating && styles.regenerateButtonDisabled]} onPress={regenerateInterpretation} disabled={regenerating}>
+                {regenerating ? (
+                  <ActivityIndicator size="small" color={Palette.paper} />
+                ) : (
+                  <Ionicons name="refresh-outline" size={18} color={Palette.paper} />
+                )}
+                <Text style={styles.regenerateButtonText}>{regenerating ? 'Generating' : 'Regenerate interpretation'}</Text>
+              </Pressable>
             </View>
           )
         ) : null}
@@ -742,7 +860,7 @@ export default function Results() {
               <MetricTile label="Heart rate" value={heartRate} unit="bpm" tone="primary" />
               <MetricTile label="PR interval" value={pr} unit="ms" />
               <MetricTile label="QRS duration" value={qrs} unit="ms" />
-              <MetricTile label="QTc" value={qtc} unit="ms" />
+              <MetricTile label="QTc" value={qtc} unit={qtcUnit} />
             </View>
             <View style={styles.contextPanel}>
               <View style={styles.contextHeader}>
@@ -1105,17 +1223,22 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     flex: 1,
     flexDirection: 'row',
-    gap: 6,
+    gap: 5,
     justifyContent: 'center',
     minHeight: 40,
+    minWidth: 0,
+    paddingHorizontal: 4,
   },
   segmentedTabActive: {
     backgroundColor: Palette.primary,
   },
   segmentedTabText: {
     color: Palette.primary,
+    flexShrink: 1,
     fontSize: 12,
     fontWeight: '900',
+    includeFontPadding: false,
+    textAlign: 'center',
   },
   segmentedTabTextActive: {
     color: Palette.paper,
@@ -1484,6 +1607,12 @@ const styles = StyleSheet.create({
   richBlock: {
     gap: 5,
   },
+  richBlockSection: {
+    borderLeftColor: Palette.primaryMuted,
+    borderLeftWidth: 3,
+    paddingLeft: 11,
+    paddingVertical: 3,
+  },
   richHeading: {
     color: Palette.primary,
     fontSize: 14,
@@ -1690,6 +1819,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 19,
+    textAlign: 'center',
+  },
+  regenerateButton: {
+    alignItems: 'center',
+    backgroundColor: Palette.primary,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 6,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  regenerateButtonDisabled: {
+    opacity: 0.72,
+  },
+  regenerateButtonText: {
+    color: Palette.paper,
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: '900',
     textAlign: 'center',
   },
   auditGrid: {

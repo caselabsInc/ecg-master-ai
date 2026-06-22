@@ -178,7 +178,18 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
     });
   }
 
-  if (report.qtInterval?.calculatedQtcMs || report.qtInterval?.qtRisk) {
+  if (report.qtInterval?.measurementStatus === 'unmeasurable') {
+    addFinding(ruleFindings, {
+      id: 'qt-interval-unmeasurable',
+      label: 'QT interval',
+      finding: `QT interval not measurable; reason: ${formatValue(report.qtInterval?.unmeasurableReason)}`,
+      basis: 'Clinician marked QT interval as unmeasurable because reliable QRS onset or T-wave end could not be identified.',
+      inputs: [
+        `Measurement status: ${formatValue(report.qtInterval?.measurementStatus)}`,
+        `Reason: ${formatValue(report.qtInterval?.unmeasurableReason)}`,
+      ],
+    });
+  } else if (report.qtInterval?.calculatedQtcMs || report.qtInterval?.qtRisk) {
     addFinding(ruleFindings, {
       id: 'qt-interval',
       label: 'QT interval',

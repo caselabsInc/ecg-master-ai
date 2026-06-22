@@ -2,15 +2,14 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { FlowHero, SectionHeader, flowStyles } from '@/components/ecg-flow-ui';
 import { LearnableText, useLearningSheet } from '@/components/ecg-learning-sheet';
 import { Layout, Palette, Radius } from '@/constants/design';
 import { useAuth } from '@/context/AuthContext';
-import { app } from '@/services/firebase';
 import { normalizeAiInterpretation } from '@/services/aiInterpretation';
 import { buildDecisionSupportAudit } from '@/services/decisionSupportAudit';
 import { completeReport, markReportAiFailed, saveReportDraft } from '@/services/db';
+import { callAppCheckedFunction } from '@/services/protectedCallable';
 import { useEcgStore } from '@/store/ecgStore';
 
 export default function Step12() {
@@ -37,15 +36,12 @@ export default function Step12() {
         setReportId(savedId);
       }
 
-      const functions = getFunctions(app);
-      const generateInterpretation = httpsCallable(functions, 'generateECGInterpretation');
-
       let aiData;
       try {
-        const response = await generateInterpretation({
+        const response = await callAppCheckedFunction('generateECGInterpretation', {
           reportData: auditedDraft,
         });
-        aiData = normalizeAiInterpretation(response.data);
+        aiData = normalizeAiInterpretation(response);
         if (!aiData) {
           throw new Error('Interpretation support could not be generated from the saved ECG review.');
         }
@@ -141,7 +137,13 @@ export default function Step12() {
           </View>
           <View style={styles.reviewCard}>
             <Text style={styles.reviewLabel}>QTc</Text>
-            <Text style={styles.reviewValue}>{draft.qtInterval?.calculatedQtcMs ? `${draft.qtInterval.calculatedQtcMs} ms` : 'Pending'}</Text>
+            <Text style={styles.reviewValue}>
+              {draft.qtInterval?.measurementStatus === 'unmeasurable'
+                ? 'Unmeasurable'
+                : draft.qtInterval?.calculatedQtcMs
+                  ? `${draft.qtInterval.calculatedQtcMs} ms`
+                  : 'Pending'}
+            </Text>
           </View>
         </View>
 

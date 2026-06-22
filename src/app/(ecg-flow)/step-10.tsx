@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FlowFooter, FlowHero, SectionHeader, flowStyles } from '@/components/ecg-flow-ui';
 import { LearnableText, useLearningSheet } from '@/components/ecg-learning-sheet';
@@ -12,6 +12,18 @@ export default function Step10() {
   const qtInterval = draft.qtInterval || {};
   const heartRate = draft.heartRate?.calculatedBpm;
   const rrIntervalMs = heartRate ? Math.round(60000 / heartRate) : undefined;
+  const measurementStatus = qtInterval.measurementStatus ?? (qtInterval.smallBoxes !== undefined ? 'measured' : undefined);
+  const isUnmeasurable = measurementStatus === 'unmeasurable';
+  const unmeasurableReasons = [
+    { label: 'Irregular rhythm', value: 'irregular_rhythm', detail: 'Beat-to-beat QT varies too much.' },
+    { label: 'Unclear T end', value: 'unclear_t_end', detail: 'T-wave return to baseline is not reliable.' },
+    { label: 'Prominent U waves', value: 'prominent_u_waves', detail: 'T and U waves cannot be separated confidently.' },
+    { label: 'Wide QRS / paced', value: 'wide_qrs_or_paced', detail: 'QT is confounded; consider JT/JTc instead.' },
+    { label: 'Tachy overlap', value: 'tachycardia_overlap', detail: 'T wave merges into the next cycle.' },
+    { label: 'Artifact', value: 'artifact', detail: 'Noise or baseline drift obscures repolarisation.' },
+    { label: 'No organised complexes', value: 'no_organized_complexes', detail: 'No consistent QRS-T complex can be measured.' },
+    { label: 'Other', value: 'other', detail: 'Document the limitation in final notes.' },
+  ] as const;
 
   const handleChange = (text: string) => {
     const boxes = parseFloat(text);
@@ -40,6 +52,8 @@ export default function Step10() {
 
     updateDraft({
       qtInterval: {
+        measurementStatus: 'measured',
+        unmeasurableReason: undefined,
         smallBoxes,
         calculatedQtMs: qtMs,
         calculatedQtcMs: primaryQtc,
@@ -54,8 +68,31 @@ export default function Step10() {
     });
   };
 
-  const isValid = qtInterval.smallBoxes !== undefined;
-  const summary = qtInterval.calculatedQtcMs !== undefined ? `${qtInterval.calculatedQtcMs} ms QTc` : 'Awaiting QT measurement';
+  const markMeasured = () => {
+    updateDraft({
+      qtInterval: {
+        ...qtInterval,
+        measurementStatus: 'measured',
+        unmeasurableReason: undefined,
+      },
+    });
+  };
+
+  const markUnmeasurable = (unmeasurableReason = qtInterval.unmeasurableReason) => {
+    updateDraft({
+      qtInterval: {
+        measurementStatus: 'unmeasurable',
+        unmeasurableReason,
+      },
+    });
+  };
+
+  const isValid = isUnmeasurable ? !!qtInterval.unmeasurableReason : qtInterval.smallBoxes !== undefined;
+  const summary = isUnmeasurable
+    ? 'QT unmeasurable'
+    : qtInterval.calculatedQtcMs !== undefined
+      ? `${qtInterval.calculatedQtcMs} ms QTc`
+      : 'Awaiting QT measurement';
 
   return (
     <View style={flowStyles.screen}>
@@ -68,8 +105,8 @@ export default function Step10() {
           summaryLabel="QT read"
           summary={summary}
           pills={[
-            { label: 'QT', complete: qtInterval.calculatedQtMs !== undefined },
-            { label: 'QTc', complete: qtInterval.calculatedQtcMs !== undefined },
+            { label: 'QT', complete: qtInterval.calculatedQtMs !== undefined || isUnmeasurable },
+            { label: 'QTc', complete: qtInterval.calculatedQtcMs !== undefined || isUnmeasurable },
           ]}
           learnTopicId="step.qtInterval"
           onOpenLearning={learning.openTopic}
@@ -77,27 +114,77 @@ export default function Step10() {
 
         <View style={flowStyles.card}>
           <SectionHeader
-            icon="resize-outline"
-            title="QT measurement"
-            detail="Measure from the start of QRS to the end of the T wave, then count small boxes."
+            icon="options-outline"
+            title="Measurement status"
+            detail="Measure QT when landmarks are clear, or mark it unmeasurable when the T-wave end cannot be trusted."
           />
-          <LearnableText topicId="step.qtInterval" onOpen={learning.openTopic} style={styles.inputLabel}>QT small boxes</LearnableText>
-          <View style={styles.inputShell}>
-            <TextInput
-              style={styles.input}
-              placeholder="10"
-              placeholderTextColor={Palette.subtle}
-              keyboardType="decimal-pad"
-              value={qtInterval.smallBoxes?.toString() || ''}
-              onChangeText={handleChange}
-            />
-            <View style={styles.unitPill}>
-              <Text style={styles.unitText}>small boxes</Text>
-            </View>
+          <View style={styles.statusRow}>
+            <Pressable
+              style={[styles.statusButton, !isUnmeasurable && styles.statusButtonActive]}
+              onPress={markMeasured}
+            >
+              <Ionicons name="resize-outline" size={18} color={!isUnmeasurable ? Palette.paper : Palette.primary} />
+              <Text style={[styles.statusButtonText, !isUnmeasurable && styles.statusButtonTextActive]}>Measure QT</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.statusButton, isUnmeasurable && styles.statusButtonActive]}
+              onPress={() => markUnmeasurable()}
+            >
+              <Ionicons name="remove-circle-outline" size={18} color={isUnmeasurable ? Palette.paper : Palette.primary} />
+              <Text style={[styles.statusButtonText, isUnmeasurable && styles.statusButtonTextActive]}>Unmeasurable</Text>
+            </Pressable>
           </View>
         </View>
 
-        <View style={styles.resultGrid}>
+        {isUnmeasurable ? (
+          <View style={flowStyles.card}>
+            <SectionHeader
+              icon="alert-circle-outline"
+              title="Why is QT unmeasurable?"
+              detail="Choose the main reason so interpretation support treats this as a deliberate clinical limitation."
+            />
+            <View style={styles.reasonGrid}>
+              {unmeasurableReasons.map((reason) => {
+                const selected = qtInterval.unmeasurableReason === reason.value;
+                return (
+                  <Pressable
+                    key={reason.value}
+                    style={[styles.reasonCard, selected && styles.reasonCardActive]}
+                    onPress={() => markUnmeasurable(reason.value)}
+                  >
+                    <Text style={[styles.reasonTitle, selected && styles.reasonTitleActive]}>{reason.label}</Text>
+                    <Text style={[styles.reasonDetail, selected && styles.reasonDetailActive]}>{reason.detail}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : (
+          <View style={flowStyles.card}>
+            <SectionHeader
+              icon="resize-outline"
+              title="QT measurement"
+              detail="Measure from the start of QRS to the end of the T wave, then count small boxes."
+            />
+            <LearnableText topicId="step.qtInterval" onOpen={learning.openTopic} style={styles.inputLabel}>QT small boxes</LearnableText>
+            <View style={styles.inputShell}>
+              <TextInput
+                style={styles.input}
+                placeholder="10"
+                placeholderTextColor={Palette.subtle}
+                keyboardType="decimal-pad"
+                value={qtInterval.smallBoxes?.toString() || ''}
+                onChangeText={handleChange}
+              />
+              <View style={styles.unitPill}>
+                <Text style={styles.unitText}>small boxes</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {!isUnmeasurable && (
+          <View style={styles.resultGrid}>
           <View style={styles.resultCard}>
             <Text style={styles.resultLabel}>QT</Text>
             <Text style={styles.resultValue} selectable>
@@ -111,8 +198,10 @@ export default function Step10() {
             </Text>
           </View>
         </View>
+        )}
 
-        <View style={flowStyles.card}>
+        {!isUnmeasurable && (
+          <View style={flowStyles.card}>
           <SectionHeader
             icon="calculator-outline"
             title="Correction methods and risk"
@@ -147,6 +236,7 @@ export default function Step10() {
             </View>
           </View>
         </View>
+        )}
 
         <View style={flowStyles.card}>
           <SectionHeader
@@ -182,6 +272,69 @@ export default function Step10() {
 
 const styles = StyleSheet.create({
   inputLabel: { color: Palette.muted, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  statusRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statusButton: {
+    alignItems: 'center',
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 52,
+    paddingHorizontal: 10,
+  },
+  statusButtonActive: {
+    backgroundColor: Palette.primary,
+    borderColor: Palette.primary,
+  },
+  statusButtonText: {
+    color: Palette.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  statusButtonTextActive: {
+    color: Palette.paper,
+  },
+  reasonGrid: {
+    gap: 10,
+  },
+  reasonCard: {
+    backgroundColor: '#f9f6ef',
+    borderColor: Palette.line,
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 4,
+    padding: 13,
+  },
+  reasonCardActive: {
+    backgroundColor: Palette.primarySoft,
+    borderColor: Palette.primary,
+  },
+  reasonTitle: {
+    color: Palette.ink,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  reasonTitleActive: {
+    color: Palette.primary,
+  },
+  reasonDetail: {
+    color: Palette.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  reasonDetailActive: {
+    color: '#416f6c',
+  },
   inputShell: {
     alignItems: 'center',
     backgroundColor: '#f9f6ef',

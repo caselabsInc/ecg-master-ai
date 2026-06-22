@@ -208,7 +208,11 @@ function formatLabel(value?: string) {
     .join(' ');
 }
 
-function derivePrCategory(prInterval: NonNullable<ReturnType<typeof useEcgStore.getState>['draft']['prInterval']>): PrCategory {
+function derivePrCategory(
+  prInterval: NonNullable<ReturnType<typeof useEcgStore.getState>['draft']['prInterval']>,
+  pWavePresence?: 'present' | 'absent' | 'unclear'
+): PrCategory {
+  if (pWavePresence === 'absent') return 'not_measurable';
   if (prInterval.regularity === 'not_constant') return 'variable';
   if (prInterval.calculatedMs === undefined) return 'not_measurable';
   if (prInterval.calculatedMs < 120) return 'short';
@@ -244,14 +248,18 @@ function deriveConductionReasoning({
   prCategory,
   avBlockConcern,
   prInterval,
+  pWavePresence,
 }: {
   prCategory: PrCategory;
   avBlockConcern: AvBlockConcern;
   prInterval: NonNullable<ReturnType<typeof useEcgStore.getState>['draft']['prInterval']>;
+  pWavePresence?: 'present' | 'absent' | 'unclear';
 }) {
   const reasons: string[] = [];
 
-  if (prInterval.regularity === 'not_constant') {
+  if (pWavePresence === 'absent') {
+    reasons.push('Discrete P waves are absent, so the PR interval cannot be measured.');
+  } else if (prInterval.regularity === 'not_constant') {
     reasons.push('PR regularity is variable, so the PR category is derived as variable.');
   } else if (prInterval.calculatedMs !== undefined) {
     reasons.push(`Measured PR is ${prInterval.calculatedMs} ms.`);
@@ -278,6 +286,8 @@ export default function Step3() {
   const { draft, updateDraft } = useEcgStore();
   const learning = useLearningSheet();
   const prInterval = draft.prInterval || {};
+  const pWavePresence = draft.pWave?.presence;
+  const isPrUnmeasurable = pWavePresence === 'absent';
 
   const [boxesText, setBoxesText] = React.useState(prInterval.smallBoxes?.toString() || '');
   const [multipleText, setMultipleText] = React.useState<string[]>(
@@ -289,6 +299,37 @@ export default function Step3() {
       setBoxesText('');
     }
   }, [prInterval.smallBoxes]);
+
+  React.useEffect(() => {
+    if (!isPrUnmeasurable) return;
+
+    if (
+      prInterval.regularity !== undefined ||
+      prInterval.smallBoxes !== undefined ||
+      prInterval.calculatedMs !== undefined ||
+      prInterval.multipleIntervals !== undefined ||
+      prInterval.segmentStatus !== undefined ||
+      prInterval.droppedBeats !== undefined ||
+      prInterval.droppedBeatPattern !== undefined
+    ) {
+      updateDraft({
+        prInterval: {
+          prCategory: 'not_measurable',
+          avBlockConcern: 'unclear',
+        },
+      });
+    }
+  }, [
+    isPrUnmeasurable,
+    prInterval.regularity,
+    prInterval.smallBoxes,
+    prInterval.calculatedMs,
+    prInterval.multipleIntervals,
+    prInterval.segmentStatus,
+    prInterval.droppedBeats,
+    prInterval.droppedBeatPattern,
+    updateDraft,
+  ]);
 
   const handleRegularityChange = (regularity: PrRegularity) => {
     const shouldCreateMultiple = regularity === 'not_constant' && !prInterval.multipleIntervals?.length;
@@ -387,15 +428,17 @@ export default function Step3() {
   };
 
   const intervalComplete =
-    prInterval.regularity === 'constant'
+    isPrUnmeasurable
+      ? true
+      : prInterval.regularity === 'constant'
       ? prInterval.smallBoxes !== undefined && prInterval.smallBoxes > 0
       : !!prInterval.multipleIntervals?.length &&
         prInterval.multipleIntervals.every((interval) => interval.smallBoxes !== undefined && interval.smallBoxes > 0);
-  const regularityComplete = !!prInterval.regularity;
-  const segmentComplete = !!prInterval.segmentStatus;
-  const droppedBeatsComplete = prInterval.droppedBeats !== undefined;
-  const droppedBeatPatternComplete = !prInterval.droppedBeats || !!prInterval.droppedBeatPattern;
-  const derivedPrCategory = derivePrCategory(prInterval);
+  const regularityComplete = isPrUnmeasurable || !!prInterval.regularity;
+  const segmentComplete = isPrUnmeasurable || !!prInterval.segmentStatus;
+  const droppedBeatsComplete = isPrUnmeasurable || prInterval.droppedBeats !== undefined;
+  const droppedBeatPatternComplete = isPrUnmeasurable || !prInterval.droppedBeats || !!prInterval.droppedBeatPattern;
+  const derivedPrCategory = derivePrCategory(prInterval, pWavePresence);
   const derivedAvBlockConcern = deriveAvBlockConcern({
     prCategory: derivedPrCategory,
     droppedBeats: prInterval.droppedBeats,
@@ -405,10 +448,13 @@ export default function Step3() {
     prCategory: derivedPrCategory,
     avBlockConcern: derivedAvBlockConcern,
     prInterval,
+    pWavePresence,
   });
   const isValid = regularityComplete && intervalComplete && segmentComplete && droppedBeatsComplete && droppedBeatPatternComplete;
   const intervalLabel =
-    prInterval.regularity === 'not_constant'
+    isPrUnmeasurable
+      ? 'PR unmeasurable'
+      : prInterval.regularity === 'not_constant'
       ? 'Variable PR intervals'
       : prInterval.calculatedMs !== undefined
         ? `${prInterval.calculatedMs} ms PR interval`
@@ -539,6 +585,19 @@ export default function Step3() {
             detail="Decide whether one measurement represents the strip or multiple intervals are needed."
           />
 
+          {isPrUnmeasurable ? (
+            <View style={styles.unmeasurablePanel}>
+              <View style={styles.unmeasurableIcon}>
+                <Ionicons name="remove-circle-outline" size={20} color={Palette.primary} />
+              </View>
+              <View style={styles.unmeasurableCopy}>
+                <Text style={styles.unmeasurableTitle}>PR interval is unmeasurable</Text>
+                <Text style={styles.unmeasurableText}>
+                  Step 2 marks discrete P waves as absent, so there is no P-wave onset to measure from.
+                </Text>
+              </View>
+            </View>
+          ) : (
           <View style={styles.choiceGrid}>
             {regularityOptions.map((option) => {
               const selected = prInterval.regularity === option.value;
@@ -557,8 +616,10 @@ export default function Step3() {
               );
             })}
           </View>
+          )}
         </View>
 
+        {!isPrUnmeasurable && (
         <View style={styles.card}>
           <SectionHeader
             icon="resize-outline"
@@ -599,7 +660,9 @@ export default function Step3() {
             />
           )}
         </View>
+        )}
 
+        {!isPrUnmeasurable && (
         <View style={styles.card}>
           <SectionHeader
             icon="analytics-outline"
@@ -636,6 +699,7 @@ export default function Step3() {
             })}
           </View>
         </View>
+        )}
 
         <View style={styles.card}>
           <SectionHeader
@@ -644,38 +708,54 @@ export default function Step3() {
             detail="Record dropped QRS complexes. PR category and AV-block concern are calculated from the entered measurements."
           />
 
-          <LearnableText topicId="input.av.droppedQrs" onOpen={learning.openTopic} style={styles.groupLabel}>Dropped QRS after P wave?</LearnableText>
-          <View style={styles.toggleRow}>
-            {[true, false].map((value) => (
-              <Pressable
-                key={String(value)}
-                style={[styles.toggleButton, prInterval.droppedBeats === value && styles.toggleButtonActive]}
-                onPress={() => setDroppedBeats(value)}
-              >
-                <Text style={[styles.toggleButtonText, prInterval.droppedBeats === value && styles.toggleButtonTextActive]}>
-                  {value ? 'Yes' : 'No'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {prInterval.droppedBeats && (
-            <>
-              <LearnableText topicId="input.av.droppedQrs" onOpen={learning.openTopic} style={styles.groupLabel}>Dropped-beat pattern</LearnableText>
-              <View style={styles.chipGrid}>
-                {droppedBeatOptions.map((option) => {
-                  const selected = prInterval.droppedBeatPattern === option.value;
-                  return (
-                    <Pressable
-                      key={option.value}
-                      style={[styles.chip, selected && styles.chipActive]}
-                      onPress={() => updateDraft({ prInterval: { ...prInterval, droppedBeatPattern: option.value } })}
-                    >
-                      <Text style={[styles.chipText, selected && styles.chipTextActive]}>{option.label}</Text>
-                    </Pressable>
-                  );
-                })}
+          {isPrUnmeasurable ? (
+            <View style={styles.unmeasurablePanel}>
+              <View style={styles.unmeasurableIcon}>
+                <Ionicons name="git-compare-outline" size={20} color={Palette.primary} />
               </View>
+              <View style={styles.unmeasurableCopy}>
+                <Text style={styles.unmeasurableTitle}>AV conduction cannot be graded from PR intervals</Text>
+                <Text style={styles.unmeasurableText}>
+                  Use rhythm synthesis for absent-P rhythms such as atrial fibrillation, flutter-like activity, junctional rhythms, or ventricular rhythms.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              <LearnableText topicId="input.av.droppedQrs" onOpen={learning.openTopic} style={styles.groupLabel}>Dropped QRS after P wave?</LearnableText>
+              <View style={styles.toggleRow}>
+                {[true, false].map((value) => (
+                  <Pressable
+                    key={String(value)}
+                    style={[styles.toggleButton, prInterval.droppedBeats === value && styles.toggleButtonActive]}
+                    onPress={() => setDroppedBeats(value)}
+                  >
+                    <Text style={[styles.toggleButtonText, prInterval.droppedBeats === value && styles.toggleButtonTextActive]}>
+                      {value ? 'Yes' : 'No'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {prInterval.droppedBeats && (
+                <>
+                  <LearnableText topicId="input.av.droppedQrs" onOpen={learning.openTopic} style={styles.groupLabel}>Dropped-beat pattern</LearnableText>
+                  <View style={styles.chipGrid}>
+                    {droppedBeatOptions.map((option) => {
+                      const selected = prInterval.droppedBeatPattern === option.value;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          style={[styles.chip, selected && styles.chipActive]}
+                          onPress={() => updateDraft({ prInterval: { ...prInterval, droppedBeatPattern: option.value } })}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextActive]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
             </>
           )}
 
@@ -1082,6 +1162,44 @@ const styles = StyleSheet.create({
   },
   choiceTextActive: {
     color: '#d7ebe8',
+  },
+  unmeasurablePanel: {
+    alignItems: 'flex-start',
+    backgroundColor: Palette.primarySoft,
+    borderColor: '#cce2df',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+  },
+  unmeasurableIcon: {
+    alignItems: 'center',
+    backgroundColor: Palette.paper,
+    borderColor: '#cce2df',
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  unmeasurableCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  unmeasurableTitle: {
+    color: Palette.primary,
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 20,
+  },
+  unmeasurableText: {
+    color: '#416f6c',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
   },
   measurementStack: {
     gap: 14,

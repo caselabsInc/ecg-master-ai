@@ -180,6 +180,8 @@ export interface EcgReport {
     syndromePattern?: 'none' | 'wellens_a' | 'wellens_b' | 'de_winter' | 'strain' | 'juvenile_pattern' | 'pe' | 'hyperkalemia' | 'hypokalemia' | 'cns_pattern';
   };
   qtInterval: {
+    measurementStatus?: 'measured' | 'unmeasurable';
+    unmeasurableReason?: 'irregular_rhythm' | 'unclear_t_end' | 'prominent_u_waves' | 'wide_qrs_or_paced' | 'tachycardia_overlap' | 'artifact' | 'no_organized_complexes' | 'other';
     smallBoxes?: number;
     calculatedQtMs?: number;
     calculatedQtcMs?: number;
@@ -280,6 +282,7 @@ export const completeReport = async (userId: string, reportId: string, aiInterpr
     status: 'completed',
     aiInterpretation: normalizedInterpretation,
     'decisionSupport.aiStatus': 'generated',
+    'decisionSupport.aiError': null,
     completedAt: serverTimestamp()
   }));
 };

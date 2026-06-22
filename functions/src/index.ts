@@ -6,10 +6,88 @@ import { GoogleGenAI } from '@google/genai';
 admin.initializeApp();
 
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
+const AI_DAILY_LIMIT_PER_USER = 30;
+const AI_COOLDOWN_MS = 30_000;
+const MAX_REPORT_DATA_BYTES = 64 * 1024;
+const MAX_PROMPT_BYTES = 96 * 1024;
+
+function getUtcDayKey(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function getJsonByteLength(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    throw new HttpsError(
+      'invalid-argument',
+      'Report data must be valid JSON.'
+    );
+  }
+}
+
+function getTimestampMillis(value: unknown): number | null {
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toMillis();
+  }
+
+  return null;
+}
+
+async function enforceAiUsageControls(uid: string) {
+  const db = admin.firestore();
+  const now = Date.now();
+  const dayKey = getUtcDayKey(new Date(now));
+  const usageRef = db.collection('aiUsage').doc(`${uid}_${dayKey}`);
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(usageRef);
+    const usage = snapshot.exists ? snapshot.data() : undefined;
+    const currentCount = typeof usage?.count === 'number' ? usage.count : 0;
+    const lastRequestMillis = getTimestampMillis(usage?.lastRequestAt);
+
+    if (currentCount >= AI_DAILY_LIMIT_PER_USER) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `Daily AI generation limit reached. Try again tomorrow.`
+      );
+    }
+
+    if (lastRequestMillis && now - lastRequestMillis < AI_COOLDOWN_MS) {
+      const retryAfterSeconds = Math.ceil((AI_COOLDOWN_MS - (now - lastRequestMillis)) / 1000);
+
+      throw new HttpsError(
+        'resource-exhausted',
+        `Please wait ${retryAfterSeconds} seconds before generating another interpretation.`
+      );
+    }
+
+    transaction.set(
+      usageRef,
+      {
+        uid,
+        dayKey,
+        count: currentCount + 1,
+        dailyLimit: AI_DAILY_LIMIT_PER_USER,
+        lastRequestAt: admin.firestore.Timestamp.fromMillis(now),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: usage?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+}
 
 export const generateECGInterpretation = onCall(
-  { secrets: [geminiApiKey] },
+  {
+    enforceAppCheck: true,
+    consumeAppCheckToken: true,
+    minInstances: 1,
+    secrets: [geminiApiKey],
+  },
   async (request) => {
+    const startedAt = Date.now();
+
     // Ensure the user is authenticated
     if (!request.auth) {
       throw new HttpsError(
@@ -26,8 +104,13 @@ export const generateECGInterpretation = onCall(
       );
     }
 
-    // Initialize the Gemini SDK inside the function execution to securely access the secret value
-    const ai = new GoogleGenAI({ apiKey: geminiApiKey.value() });
+    const reportDataBytes = getJsonByteLength(reportData);
+    if (reportDataBytes > MAX_REPORT_DATA_BYTES) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Report data is too large to process.'
+      );
+    }
 
 const prompt = `
 You are an ECG educational decision-support assistant for clinicians.
@@ -72,13 +155,35 @@ Respond ONLY with a valid JSON object matching this schema exactly:
 }
 `;
 
+    const promptBytes = Buffer.byteLength(prompt, 'utf8');
+    if (promptBytes > MAX_PROMPT_BYTES) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Generated AI prompt is too large to process.'
+      );
+    }
+
+    await enforceAiUsageControls(request.auth.uid);
+
+    // Initialize the Gemini SDK inside the function execution to securely access the secret value
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey.value() });
+
     try {
+      console.info('generateECGInterpretation: starting Gemini request', {
+        inputBytes: promptBytes,
+        reportDataBytes,
+        uid: request.auth.uid,
+      });
+      const geminiStartedAt = Date.now();
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
         }
+      });
+      console.info('generateECGInterpretation: Gemini request completed', {
+        latencyMs: Date.now() - geminiStartedAt,
       });
 
       const responseText = response.text;
@@ -104,6 +209,10 @@ Respond ONLY with a valid JSON object matching this schema exactly:
           throw new Error(`Missing interpretation field: ${field}`);
         }
       }
+
+      console.info('generateECGInterpretation: completed', {
+        totalLatencyMs: Date.now() - startedAt,
+      });
 
       return { interpretation };
 

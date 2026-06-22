@@ -10,8 +10,11 @@
     "ios": {
       "icon": "./assets/icon.png",
       "bundleIdentifier": "com.caselabs.ecgmaster",
-      "buildNumber": "7",
+      "buildNumber": "9",
       "googleServicesFile": "./GoogleService-Info.plist",
+      "entitlements": {
+        "com.apple.developer.devicecheck.appattest-environment": "production"
+      },
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -55,6 +58,8 @@
           }
         }
       ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/app-check",
       "@react-native-community/datetimepicker"
     ],
     "experiments": {

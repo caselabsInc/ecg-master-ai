@@ -291,6 +291,12 @@ export default function Step2() {
           abnormalFeatures: undefined,
         }),
       },
+      ...(presence === 'absent' && {
+        prInterval: {
+          prCategory: 'not_measurable',
+          avBlockConcern: 'unclear',
+        },
+      }),
     });
   };
 
