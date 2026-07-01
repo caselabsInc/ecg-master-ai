@@ -1,4 +1,5 @@
 import { EcgReport } from './db';
+import { runDiagnosticRules } from './diagnostics/engine';
 
 type DecisionSupport = NonNullable<EcgReport['decisionSupport']>;
 type RuleFinding = NonNullable<DecisionSupport['ruleFindings']>[number];
@@ -74,10 +75,16 @@ function addFinding(
   findings: RuleFinding[],
   finding: Omit<RuleFinding, 'source'> & { source?: RuleFinding['source'] }
 ) {
+  if (findings.some((existing) => existing.id === finding.id)) return;
+
   findings.push({
     source: 'rule_derived',
     ...finding,
   });
+}
+
+function addDiagnosticDecisionTreeFindings(report: Partial<EcgReport>, findings: RuleFinding[]) {
+  runDiagnosticRules(report).forEach((finding) => addFinding(findings, finding));
 }
 
 export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionSupport {
@@ -239,6 +246,8 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
     });
   }
 
+  addDiagnosticDecisionTreeFindings(report, ruleFindings);
+
   return {
     intendedUse: 'clinician_education_decision_support',
     clinicianOnly: true,
@@ -254,9 +263,13 @@ export function buildDecisionSupportAudit(report: Partial<EcgReport>): DecisionS
         prInterval: report.prInterval ?? {},
         qrsComplex: report.qrsComplex ?? {},
         axis: report.axis ?? {},
+        qWaves: report.qWaves ?? {},
         stSegment: report.stSegment ?? {},
         tWaves: report.tWaves ?? {},
         qtInterval: report.qtInterval ?? {},
+        rWaveProgression: report.rWaveProgression ?? null,
+        lateWaveFindings: report.lateWaveFindings ?? {},
+        uWaves: report.uWaves ?? {},
       },
       missingOrUncertainInputs,
     },

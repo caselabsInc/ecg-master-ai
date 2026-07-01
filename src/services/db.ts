@@ -1,4 +1,4 @@
-import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { normalizeAiInterpretation } from './aiInterpretation';
 
@@ -276,6 +276,35 @@ export const saveReportDraft = async (userId: string, report: Partial<EcgReport>
   }
 };
 
+export const saveManualReport = async (userId: string, report: Partial<EcgReport>, reportId?: string) => {
+  const reportsRef = collection(db, 'users', userId, 'reports');
+
+  const reportData = removeUndefined({
+    ...report,
+    status: 'completed',
+    aiInterpretation: null,
+    decisionSupport: {
+      ...report.decisionSupport,
+      aiStatus: 'not_requested',
+      aiError: null,
+    },
+    completedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  if (reportId) {
+    const docRef = doc(db, 'users', userId, 'reports', reportId);
+    await updateDoc(docRef, reportData);
+    return reportId;
+  }
+
+  const docRef = await addDoc(reportsRef, {
+    ...reportData,
+    createdAt: serverTimestamp(),
+  });
+  return docRef.id;
+};
+
 export const completeReport = async (userId: string, reportId: string, aiInterpretation: EcgReport['aiInterpretation']) => {
   const normalizedInterpretation = normalizeAiInterpretation(aiInterpretation);
   if (!normalizedInterpretation) {
@@ -299,7 +328,6 @@ export const markReportAiFailed = async (
 ) => {
   const docRef = doc(db, 'users', userId, 'reports', reportId);
   await updateDoc(docRef, removeUndefined({
-    status: 'draft',
     'decisionSupport.aiStatus': 'failed',
     'decisionSupport.aiError': {
       ...error,

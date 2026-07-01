@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { completeReport, EcgReport, markReportAiFailed } from '@/services/db';
 import { normalizeAiInterpretation } from '@/services/aiInterpretation';
 import { buildDecisionSupportAudit } from '@/services/decisionSupportAudit';
+import { getTreatmentGuidanceForFinding, type TreatmentGuidance } from '@/services/diagnostics/treatments';
 import { Layout, Palette, Radius } from '@/constants/design';
 import { callAppCheckedFunction } from '@/services/protectedCallable';
 
@@ -15,8 +16,8 @@ type ReportTab = 'ai' | 'findings' | 'audit';
 type DangerousFindingsState = 'none' | 'warning' | 'unknown';
 
 const reportTabs: { key: ReportTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'ai', label: 'Interpretation', icon: 'sparkles-outline' },
-  { key: 'findings', label: 'Findings', icon: 'git-branch-outline' },
+  { key: 'findings', label: 'Manual', icon: 'git-branch-outline' },
+  { key: 'ai', label: 'AI Assist', icon: 'sparkles-outline' },
   { key: 'audit', label: 'Review basis', icon: 'receipt-outline' },
 ];
 
@@ -187,10 +188,81 @@ function ContextRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function priorityLabel(priority: TreatmentGuidance['clinicalPriority']) {
+  return priority.replaceAll('_', ' ');
+}
+
+function GuidanceList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+
+  return (
+    <View style={styles.guidanceSection}>
+      <Text style={styles.guidanceSectionTitle}>{title}</Text>
+      {items.slice(0, 4).map((item) => (
+        <Text key={item} style={styles.guidanceItem} selectable>
+          {item}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+function TreatmentGuidancePanel({ guidance }: { guidance?: TreatmentGuidance }) {
+  if (!guidance) return null;
+
+  return (
+    <View style={styles.treatmentPanel}>
+      <View style={styles.treatmentHeader}>
+        <View style={styles.treatmentIcon}>
+          <Ionicons name="medkit-outline" size={16} color={Palette.primary} />
+        </View>
+        <View style={styles.treatmentTitleBlock}>
+          <Text style={styles.treatmentTitle}>Management guidance</Text>
+          <Text style={styles.treatmentSubtitle} selectable>
+            {guidance.conditionName} · {priorityLabel(guidance.clinicalPriority)}
+          </Text>
+        </View>
+      </View>
+      <Text style={styles.treatmentMeaning} selectable>
+        {guidance.briefClinicalMeaning}
+      </Text>
+      <GuidanceList title="Immediate actions" items={guidance.immediateActions} />
+      <GuidanceList title="Stable management" items={guidance.stableManagement} />
+      <GuidanceList title="Unstable management" items={guidance.unstableManagement} />
+      {guidance.medications.length ? (
+        <View style={styles.guidanceSection}>
+          <Text style={styles.guidanceSectionTitle}>Medications</Text>
+          {guidance.medications.slice(0, 3).map((medication) => (
+            <Text key={`${medication.name}-${medication.role}`} style={styles.guidanceItem} selectable>
+              {medication.name}: {medication.role}{medication.dose ? ` Dose: ${medication.dose}` : ''}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {guidance.avoidOrContraindications.length ? (
+        <View style={styles.safetyBlock}>
+          <Text style={styles.safetyTitle}>Safety blocks</Text>
+          {guidance.avoidOrContraindications.slice(0, 3).map((block) => (
+            <Text key={`${block.therapy}-${block.dangerLevel}`} style={styles.safetyItem} selectable>
+              {block.dangerLevel.toUpperCase()}: {block.therapy} - {block.reason}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      <GuidanceList title="Red flags" items={guidance.redFlags} />
+      <Text style={styles.guidanceDisclaimer} selectable>
+        {guidance.disclaimer}
+      </Text>
+    </View>
+  );
+}
+
 function RuleFindingCard({
   finding,
+  treatmentGuidance,
 }: {
   finding: NonNullable<NonNullable<EcgReport['decisionSupport']>['ruleFindings']>[number];
+  treatmentGuidance?: TreatmentGuidance;
 }) {
   return (
     <View style={styles.ruleFindingCard}>
@@ -217,6 +289,7 @@ function RuleFindingCard({
           ))}
         </View>
       ) : null}
+      <TreatmentGuidancePanel guidance={treatmentGuidance} />
     </View>
   );
 }
@@ -262,8 +335,8 @@ function displayUrgencyLabel(urgencyLevel: string, hasAiDraft: boolean) {
 
 function displayInterpretationStatus(status?: string, hasAiDraft = false) {
   if (hasAiDraft || status === 'generated') return 'Available';
-  if (status === 'failed') return 'Unavailable';
-  return 'Not available';
+  if (status === 'failed') return 'Failed';
+  return 'Not requested';
 }
 
 function previewText(text: string, maxLength = 180) {
@@ -548,7 +621,7 @@ export default function Results() {
   const [report, setReport] = useState<EcgReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
-  const [activeTab, setActiveTab] = useState<ReportTab>('ai');
+  const [activeTab, setActiveTab] = useState<ReportTab>('findings');
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     dangerous: true,
     summary: true,
@@ -588,7 +661,13 @@ export default function Results() {
 
   const shareReport = async () => {
     if (!report) return;
-    const interpretation = readInterpretation(report.aiInterpretation);
+    const aiInterpretation = normalizeAiInterpretation(report.aiInterpretation);
+    const refreshedDecisionSupport = buildDecisionSupportAudit(report);
+    const findings = refreshedDecisionSupport.ruleFindings ?? [];
+    const manualSummary = findings.length
+      ? findings.slice(0, 5).map((finding) => `${finding.label}: ${finding.finding}`).join('\n')
+      : 'No criteria-based findings were saved for this report.';
+    const summary = aiInterpretation?.stepByStepInterpretation || `Manual criteria review\n${manualSummary}`;
     const qrsShare = report.qrsComplex?.presence === 'absent' ? 'absent' : `${report.qrsComplex?.calculatedMs ?? '--'} ms`;
     const qtcShare = report.qrsComplex?.presence === 'absent'
       ? 'unmeasurable: no QRS'
@@ -598,7 +677,7 @@ export default function Results() {
           ? 'unmeasurable'
           : `${report.qtInterval?.calculatedQtcMs ?? '--'} ms`;
     await Share.share({
-      message: `ECG report\n\n${interpretation.summary}\n\nHR: ${report.heartRate?.calculatedBpm ?? '--'} bpm\nPR: ${
+      message: `ECG report\n\n${summary}\n\nHR: ${report.heartRate?.calculatedBpm ?? '--'} bpm\nPR: ${
         report.prInterval?.calculatedMs ?? '--'
       } ms\nQRS: ${qrsShare}\nQTc: ${qtcShare}`,
     });
@@ -619,7 +698,7 @@ export default function Results() {
           aiError: undefined,
         },
       };
-      const response = await callAppCheckedFunction('generateECGInterpretation', { reportData });
+      const response = await callAppCheckedFunction('generateECGInterpretation', { reportData, reportId: id });
       const aiData = normalizeAiInterpretation(response);
 
       if (!aiData) {
@@ -656,7 +735,6 @@ export default function Results() {
 
         return {
           ...current,
-          status: 'draft',
           decisionSupport: {
             ...current.decisionSupport,
             aiStatus: 'failed',
@@ -737,9 +815,15 @@ export default function Results() {
   ].join(' · ');
   const urgencyLabel = displayUrgencyLabel(interpretation.urgencyLevel, hasAiDraft);
   const displayAiStatus = displayInterpretationStatus(decisionSupport.aiStatus, hasAiDraft);
-  const heroPreview = previewText(interpretation.primary || interpretation.summary);
   const qrsFinding = ruleFindings.find(isQrsFinding);
   const primaryRuleFindings = ruleFindings.filter((finding) => !isQrsFinding(finding));
+  const leadManualFinding = primaryRuleFindings[0] ?? qrsFinding;
+  const manualHeroPreview = leadManualFinding
+    ? previewText(`${leadManualFinding.label}: ${leadManualFinding.finding}`)
+    : 'Manual criteria review is ready. AI Assist is optional and can be generated from the AI Assist tab.';
+  const aiHeroPreview = previewText(interpretation.primary || interpretation.summary);
+  const heroPreview = hasAiDraft ? aiHeroPreview : manualHeroPreview;
+  const aiAssistButtonLabel = decisionSupport.aiStatus === 'failed' ? 'Try AI Assist again' : 'Generate AI Assist';
 
   return (
     <View style={styles.container}>
@@ -763,29 +847,19 @@ export default function Results() {
         <View style={styles.hero}>
           <View style={styles.heroTop}>
             <View style={styles.heroCopy}>
-              <Text style={styles.heroKicker}>{hasAiDraft ? 'Interpretation support' : 'Interpretation status'}</Text>
-              <Text style={styles.heroTitle}>
-                {hasAiDraft
-                  ? 'Clinical interpretation'
-                  : decisionSupport.aiStatus === 'failed'
-                    ? 'Interpretation unavailable'
-                    : 'Interpretation not yet available'}
-              </Text>
+              <Text style={styles.heroKicker}>Manual criteria output</Text>
+              <Text style={styles.heroTitle}>Manual review ready</Text>
             </View>
             <View style={styles.heroBadge}>
-              <Ionicons name={hasAiDraft ? 'pulse' : decisionSupport.aiStatus === 'failed' ? 'cloud-offline-outline' : 'hourglass-outline'} size={20} color={Palette.paper} />
+              <Ionicons name={hasAiDraft ? 'sparkles-outline' : 'git-branch-outline'} size={20} color={Palette.paper} />
             </View>
           </View>
           <Text style={styles.heroText} selectable>
-            {hasAiDraft
-              ? heroPreview
-              : decisionSupport.aiStatus === 'failed'
-                ? decisionSupport.aiError?.message || 'Interpretation support could not be generated for this report.'
-                : 'This report is saved, but interpretation support is not available yet.'}
+            {heroPreview}
           </Text>
           <View style={[styles.urgencyPill, hasAiDraft && styles.urgencyPillGenerated, !hasAiDraft && styles.statusHeroPill]}>
-            <Ionicons name={hasAiDraft ? 'checkmark-circle-outline' : 'information-circle-outline'} size={14} color={Palette.paper} />
-            <Text style={styles.urgencyText}>{hasAiDraft ? urgencyLabel : displayAiStatus}</Text>
+            <Ionicons name={hasAiDraft ? 'checkmark-circle-outline' : 'sparkles-outline'} size={14} color={Palette.paper} />
+            <Text style={styles.urgencyText}>{hasAiDraft ? `AI ${urgencyLabel}` : `AI ${displayAiStatus}`}</Text>
           </View>
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaItem}>
@@ -847,20 +921,20 @@ export default function Results() {
             </View>
           ) : (
             <View style={styles.pendingPanel}>
-              <Ionicons name={decisionSupport.aiStatus === 'failed' ? 'cloud-offline-outline' : 'hourglass-outline'} size={24} color={Palette.primaryMuted} />
-              <Text style={styles.pendingTitle}>{decisionSupport.aiStatus === 'failed' ? 'Interpretation unavailable' : 'Interpretation not yet available'}</Text>
+              <Ionicons name={decisionSupport.aiStatus === 'failed' ? 'cloud-offline-outline' : 'sparkles-outline'} size={24} color={Palette.primaryMuted} />
+              <Text style={styles.pendingTitle}>{decisionSupport.aiStatus === 'failed' ? 'AI Assist unavailable' : 'AI Assist is optional'}</Text>
               <Text style={styles.pendingText} selectable>
                 {decisionSupport.aiStatus === 'failed'
-                  ? decisionSupport.aiError?.message || 'Interpretation support could not be generated. The entered ECG review was saved.'
-                  : 'This report is saved, but interpretation support has not been generated yet.'}
+                  ? decisionSupport.aiError?.message || 'AI Assist could not be generated. The manual criteria review remains saved.'
+                  : 'The manual criteria output is ready. Generate AI Assist only when you want the additional AI interpretation.'}
               </Text>
               <Pressable style={[styles.regenerateButton, regenerating && styles.regenerateButtonDisabled]} onPress={regenerateInterpretation} disabled={regenerating}>
                 {regenerating ? (
                   <ActivityIndicator size="small" color={Palette.paper} />
                 ) : (
-                  <Ionicons name="refresh-outline" size={18} color={Palette.paper} />
+                  <Ionicons name="sparkles-outline" size={18} color={Palette.paper} />
                 )}
-                <Text style={styles.regenerateButtonText}>{regenerating ? 'Generating' : 'Regenerate interpretation'}</Text>
+                <Text style={styles.regenerateButtonText}>{regenerating ? 'Generating' : aiAssistButtonLabel}</Text>
               </Pressable>
             </View>
           )
@@ -916,7 +990,7 @@ export default function Results() {
               {primaryRuleFindings.length ? (
                 <View style={styles.ruleFindingsList}>
                   {primaryRuleFindings.map((finding) => (
-                    <RuleFindingCard key={finding.id} finding={finding} />
+                    <RuleFindingCard key={finding.id} finding={finding} treatmentGuidance={getTreatmentGuidanceForFinding(finding.id)} />
                   ))}
                 </View>
               ) : (
@@ -1535,6 +1609,93 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 17,
+  },
+  treatmentPanel: {
+    backgroundColor: Palette.paper,
+    borderColor: '#d7e5e2',
+    borderCurve: 'continuous',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: 10,
+    marginTop: 4,
+    padding: 13,
+  },
+  treatmentHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  treatmentIcon: {
+    alignItems: 'center',
+    backgroundColor: Palette.primarySoft,
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  treatmentTitleBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  treatmentTitle: {
+    color: Palette.primary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  treatmentSubtitle: {
+    color: Palette.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  treatmentMeaning: {
+    color: Palette.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+  guidanceSection: {
+    gap: 5,
+  },
+  guidanceSectionTitle: {
+    color: Palette.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  guidanceItem: {
+    color: Palette.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  safetyBlock: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fed7aa',
+    borderCurve: 'continuous',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    gap: 5,
+    padding: 10,
+  },
+  safetyTitle: {
+    color: Palette.accent,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  safetyItem: {
+    color: Palette.ink,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 17,
+  },
+  guidanceDisclaimer: {
+    color: Palette.subtle,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
   },
   qrsPanel: {
     backgroundColor: Palette.paper,

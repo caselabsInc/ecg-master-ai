@@ -27,6 +27,9 @@ export function ReportCard({ report, onPress }: ReportCardProps) {
   const heartRate = report.heartRate?.calculatedBpm;
   const indication = report.context?.indication || 'Indication not documented';
   const aiInterpretation = normalizeAiInterpretation(report.aiInterpretation);
+  const firstRuleFinding = report.decisionSupport?.ruleFindings?.[0];
+  const summaryText = aiInterpretation?.stepByStepInterpretation
+    || (firstRuleFinding ? `${firstRuleFinding.label}: ${firstRuleFinding.finding}` : null);
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -49,13 +52,13 @@ export function ReportCard({ report, onPress }: ReportCardProps) {
         </View>
       </View>
 
-      {isCompleted && aiInterpretation?.stepByStepInterpretation ? (
+      {isCompleted && summaryText ? (
         <Text style={styles.summary} numberOfLines={2}>
-          {aiInterpretation.stepByStepInterpretation}
+          {summaryText}
         </Text>
       ) : (
         <Text style={styles.summary} numberOfLines={2}>
-          {isCompleted ? 'Interpretation support available.' : 'Continue the ECG review when ready.'}
+          {isCompleted ? 'Manual criteria summary available.' : 'Continue the ECG review when ready.'}
         </Text>
       )}
 

@@ -10,6 +10,15 @@ const AI_DAILY_LIMIT_PER_USER = 30;
 const AI_COOLDOWN_MS = 30_000;
 const MAX_REPORT_DATA_BYTES = 64 * 1024;
 const MAX_PROMPT_BYTES = 96 * 1024;
+const AI_INTERPRETATION_MODEL = 'gemini-2.5-flash';
+
+type GeminiUsage = {
+  promptTokenCount: number | null;
+  candidatesTokenCount: number | null;
+  thoughtsTokenCount: number | null;
+  totalTokenCount: number | null;
+  cachedContentTokenCount: number | null;
+};
 
 function getUtcDayKey(date = new Date()): string {
   return date.toISOString().slice(0, 10);
@@ -32,6 +41,117 @@ function getTimestampMillis(value: unknown): number | null {
   }
 
   return null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeGeminiUsageMetadata(value: unknown): GeminiUsage {
+  const metadata = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+
+  return {
+    promptTokenCount: readNumber(metadata.promptTokenCount),
+    candidatesTokenCount: readNumber(metadata.candidatesTokenCount),
+    thoughtsTokenCount: readNumber(metadata.thoughtsTokenCount),
+    totalTokenCount: readNumber(metadata.totalTokenCount),
+    cachedContentTokenCount: readNumber(metadata.cachedContentTokenCount),
+  };
+}
+
+function pickReportDataForAi(reportData: any) {
+  return {
+    context: reportData.context ?? {},
+    additionalNotes: reportData.additionalNotes ?? '',
+    heartRate: reportData.heartRate ?? {},
+    rhythm: reportData.rhythm ?? {},
+    pWave: reportData.pWave ?? {},
+    prInterval: reportData.prInterval ?? {},
+    qrsComplex: reportData.qrsComplex ?? {},
+    axis: reportData.axis ?? {},
+    stSegment: reportData.stSegment ?? {},
+    tWaves: reportData.tWaves ?? {},
+    qtInterval: reportData.qtInterval ?? {},
+  };
+}
+
+function buildAiSynthesisPayload(reportData: any) {
+  const decisionSupport = reportData.decisionSupport ?? {};
+  const auditTrail = decisionSupport.auditTrail ?? {};
+  const ruleFindings = Array.isArray(decisionSupport.ruleFindings)
+    ? decisionSupport.ruleFindings.map((finding: any) => ({
+        id: finding.id,
+        label: finding.label,
+        source: finding.source,
+        finding: finding.finding,
+        basis: finding.basis,
+        inputs: Array.isArray(finding.inputs) ? finding.inputs : [],
+      }))
+    : [];
+
+  return {
+    patientContext: reportData.context ?? {},
+    ruleDerivedReviewBasis: {
+      intendedUse: decisionSupport.intendedUse,
+      clinicianOnly: decisionSupport.clinicianOnly,
+      regulatoryPosition: decisionSupport.regulatoryPosition,
+      ruleFindings,
+      missingOrUncertainInputs: auditTrail.missingOrUncertainInputs ?? [],
+    },
+    structuredMeasurements: pickReportDataForAi(reportData),
+  };
+}
+
+async function recordAiUsage(params: {
+  uid: string;
+  reportId?: string | null;
+  model: string;
+  usage: GeminiUsage;
+  promptBytes: number;
+  reportDataBytes: number;
+  latencyMs: number;
+  status: 'success' | 'failed';
+}) {
+  const db = admin.firestore();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const dayKey = getUtcDayKey();
+  const usageRef = db.collection('aiUsage').doc(`${params.uid}_${dayKey}`);
+  const eventRef = db.collection('aiUsageEvents').doc();
+  const incrementIfKnown = (value: number | null) => value ?? 0;
+
+  const usageEvent = {
+    uid: params.uid,
+    reportId: params.reportId || null,
+    dayKey,
+    model: params.model,
+    status: params.status,
+    promptBytes: params.promptBytes,
+    reportDataBytes: params.reportDataBytes,
+    latencyMs: params.latencyMs,
+    usage: params.usage,
+    createdAt: now,
+  };
+
+  await db.runTransaction(async (transaction) => {
+    transaction.set(eventRef, usageEvent);
+    transaction.set(
+      usageRef,
+      {
+        uid: params.uid,
+        dayKey,
+        promptTokenCount: admin.firestore.FieldValue.increment(incrementIfKnown(params.usage.promptTokenCount)),
+        candidatesTokenCount: admin.firestore.FieldValue.increment(incrementIfKnown(params.usage.candidatesTokenCount)),
+        thoughtsTokenCount: admin.firestore.FieldValue.increment(incrementIfKnown(params.usage.thoughtsTokenCount)),
+        totalTokenCount: admin.firestore.FieldValue.increment(incrementIfKnown(params.usage.totalTokenCount)),
+        cachedContentTokenCount: admin.firestore.FieldValue.increment(incrementIfKnown(params.usage.cachedContentTokenCount)),
+        totalPromptBytes: admin.firestore.FieldValue.increment(params.promptBytes),
+        totalReportDataBytes: admin.firestore.FieldValue.increment(params.reportDataBytes),
+        lastUsageRecordedAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  });
 }
 
 async function enforceAiUsageControls(uid: string) {
@@ -121,6 +241,7 @@ export const generateECGInterpretation = onCall(
     const uid = await getAuthenticatedUid(request);
 
     const reportData = request.data.reportData;
+    const reportId = typeof request.data.reportId === 'string' ? request.data.reportId : null;
     if (!reportData) {
       throw new HttpsError(
         'invalid-argument',
@@ -136,11 +257,14 @@ export const generateECGInterpretation = onCall(
       );
     }
 
-const prompt = `
+    const aiSynthesisPayload = buildAiSynthesisPayload(reportData);
+
+    const prompt = `
 You are an ECG educational decision-support assistant for clinicians.
 Use only the structured observations and measurements entered by the clinician. Do not claim to acquire, process, scan, or analyze an ECG waveform or medical image.
 Do not present yourself as making an autonomous diagnosis. Separate clinician-entered/rule-derived findings from AI-generated synthesis.
 When evidence is insufficient, say so explicitly. Treat high-risk patterns conservatively and recommend clinician review rather than issuing directives.
+Use the rule-derived review basis as the primary source of truth. The structured measurements are backup context only. Do not contradict rule-derived findings; if a rule finding and measurement appear inconsistent, flag uncertainty instead of resolving it yourself.
 
 Provide:
 1. A clinician-reviewable draft ECG interpretation with confidence/uncertainty.
@@ -160,7 +284,7 @@ Gender: ${reportData.context?.gender || 'Unknown'}
 Indication: ${reportData.context?.indication || 'None'}
 
 Measurements:
-${JSON.stringify(reportData, null, 2)}
+${JSON.stringify(aiSynthesisPayload)}
 
 Respond ONLY with a valid JSON object matching this schema exactly:
 {
@@ -191,23 +315,28 @@ Respond ONLY with a valid JSON object matching this schema exactly:
 
     // Initialize the Gemini SDK inside the function execution to securely access the secret value
     const ai = new GoogleGenAI({ apiKey: geminiApiKey.value() });
+    let usage = normalizeGeminiUsageMetadata(null);
 
     try {
       console.info('generateECGInterpretation: starting Gemini request', {
         inputBytes: promptBytes,
         reportDataBytes,
+        model: AI_INTERPRETATION_MODEL,
         uid,
       });
       const geminiStartedAt = Date.now();
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: AI_INTERPRETATION_MODEL,
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
         }
       });
+      const geminiLatencyMs = Date.now() - geminiStartedAt;
+      usage = normalizeGeminiUsageMetadata((response as any).usageMetadata);
       console.info('generateECGInterpretation: Gemini request completed', {
-        latencyMs: Date.now() - geminiStartedAt,
+        latencyMs: geminiLatencyMs,
+        usage,
       });
 
       const responseText = response.text;
@@ -238,10 +367,35 @@ Respond ONLY with a valid JSON object matching this schema exactly:
         totalLatencyMs: Date.now() - startedAt,
       });
 
-      return { interpretation };
+      await recordAiUsage({
+        uid,
+        reportId,
+        model: AI_INTERPRETATION_MODEL,
+        usage,
+        promptBytes,
+        reportDataBytes,
+        latencyMs: geminiLatencyMs,
+        status: 'success',
+      });
+
+      return { interpretation, usage };
 
     } catch (error) {
       console.error('Error generating interpretation:', error);
+      await recordAiUsage({
+        uid,
+        reportId,
+        model: AI_INTERPRETATION_MODEL,
+        usage,
+        promptBytes,
+        reportDataBytes,
+        latencyMs: Date.now() - startedAt,
+        status: 'failed',
+      }).catch((usageError) => {
+        console.warn('generateECGInterpretation: failed to record AI usage failure', {
+          error: usageError instanceof Error ? usageError.message : String(usageError),
+        });
+      });
       throw new HttpsError(
         'internal',
         'Failed to generate interpretation'

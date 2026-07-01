@@ -6,10 +6,8 @@ import { FlowHero, SectionHeader, flowStyles } from '@/components/ecg-flow-ui';
 import { LearnableText, useLearningSheet } from '@/components/ecg-learning-sheet';
 import { Layout, Palette, Radius } from '@/constants/design';
 import { useAuth } from '@/context/AuthContext';
-import { normalizeAiInterpretation } from '@/services/aiInterpretation';
 import { buildDecisionSupportAudit } from '@/services/decisionSupportAudit';
-import { completeReport, markReportAiFailed, saveReportDraft } from '@/services/db';
-import { callAppCheckedFunction } from '@/services/protectedCallable';
+import { saveManualReport } from '@/services/db';
 import { useEcgStore } from '@/store/ecgStore';
 
 export default function Step12() {
@@ -31,32 +29,10 @@ export default function Step12() {
         ...draft,
         decisionSupport: buildDecisionSupportAudit(draft),
       };
-      const savedId = await saveReportDraft(user.uid, auditedDraft, reportId || undefined);
+      const savedId = await saveManualReport(user.uid, auditedDraft, reportId || undefined);
       if (!reportId) {
         setReportId(savedId);
       }
-
-      let aiData;
-      try {
-        const response = await callAppCheckedFunction('generateECGInterpretation', {
-          reportData: auditedDraft,
-        });
-        aiData = normalizeAiInterpretation(response);
-        if (!aiData) {
-          throw new Error('Interpretation support could not be generated from the saved ECG review.');
-        }
-      } catch (funcError: any) {
-        console.warn('Firebase function failed.', funcError);
-        await markReportAiFailed(user.uid, savedId, {
-          code: funcError?.code,
-          message: 'Interpretation support could not be generated for this report.',
-        });
-        resetDraft();
-        router.replace(`/(ecg-flow)/results?id=${savedId}`);
-        return;
-      }
-
-      await completeReport(user.uid, savedId, aiData);
 
       resetDraft();
       router.replace(`/(ecg-flow)/results?id=${savedId}`);
@@ -77,10 +53,10 @@ export default function Step12() {
         <FlowHero
           step={12}
           label="Step 12 · Final review"
-          title="Add final context and prepare interpretation support."
+          title="Add final context and prepare the manual criteria summary."
           progress="100%"
           summaryLabel="Report status"
-          summary={loading ? 'Preparing interpretation support' : 'Ready for final review'}
+          summary={loading ? 'Saving manual summary' : 'Ready for final review'}
           pills={[
             { label: 'ECG data', complete: true },
             { label: 'Notes', complete: !!draft.additionalNotes },
@@ -110,13 +86,13 @@ export default function Step12() {
 
         <View style={styles.synthesisCard}>
           <View style={styles.synthesisIcon}>
-            <Ionicons name="sparkles-outline" size={22} color={Palette.paper} />
+            <Ionicons name="git-branch-outline" size={22} color={Palette.paper} />
           </View>
           <View style={styles.synthesisCopy}>
-          <Text style={styles.synthesisTitle}>Interpretation synthesis</Text>
-          <Text style={styles.synthesisText}>
-              ECG-Master will save the clinician-entered measurements, preserve the review basis, prepare interpretation support, and open the report for clinician review.
-          </Text>
+            <Text style={styles.synthesisTitle}>Manual criteria summary</Text>
+            <Text style={styles.synthesisText}>
+              ECG-Master will save the clinician-entered measurements, preserve the review basis, and open the manual output first. AI Assist can be requested from the report screen.
+            </Text>
           </View>
         </View>
 
@@ -154,7 +130,7 @@ export default function Step12() {
         {loading && (
           <View style={styles.loadingPanel}>
             <ActivityIndicator size="large" color={Palette.primary} />
-            <Text style={styles.loadingText}>Preparing interpretation support...</Text>
+            <Text style={styles.loadingText}>Saving manual criteria summary...</Text>
           </View>
         )}
       </ScrollView>
@@ -171,7 +147,7 @@ export default function Step12() {
           ) : (
             <Ionicons name="flash-outline" size={18} color={Palette.paper} />
           )}
-          <Text style={styles.submitButtonText}>{loading ? 'Preparing' : 'Prepare report'}</Text>
+          <Text style={styles.submitButtonText}>{loading ? 'Saving' : 'View manual summary'}</Text>
         </Pressable>
       </View>
     </View>
